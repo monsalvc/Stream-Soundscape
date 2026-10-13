@@ -52,7 +52,7 @@ private:
         compMakeup { "Makeup" };
     Knob verbSize { "Size" }, verbDamp { "Damping" }, verbReturn { "Return" };
     Knob ceiling { "Ceiling" }, limRel { "Release" };
-    SlotButton slot1, slot2;
+    SlotButton slot1, slot2, verbSlot;
 
     juce::Rectangle<int> compArea, verbArea, limArea, insertArea, grArea;
 };

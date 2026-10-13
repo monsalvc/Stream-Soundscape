@@ -26,6 +26,7 @@ RackProcessor::RackProcessor (PluginHost& h)
 
     for (int i = 0; i < numMasterSlots; ++i)
         masterSlots[(size_t) i] = std::make_unique<PluginSlot> (masterId ("slot") + juce::String (i));
+    reverbSlot = std::make_unique<PluginSlot> (masterId ("verbSlot"));
 
     auto get = [this] (const char* name) { return state.getRawParameterValue (masterId (name)); };
     m = { get ("compOn"),   get ("compThr"),  get ("compRatio"),  get ("compAtk"), get ("compRel"),
@@ -36,11 +37,17 @@ RackProcessor::RackProcessor (PluginHost& h)
 RackProcessor::~RackProcessor()
 {
     // Plugins must be released before the host's format manager goes away.
+    forEachSlot ([] (PluginSlot& s) { s.setPlugin (nullptr); });
+}
+
+void RackProcessor::forEachSlot (const std::function<void (PluginSlot&)>& fn)
+{
     for (auto& s : strips)
         for (int i = 0; i < slotsPerStrip; ++i)
-            s.getSlot (i).setPlugin (nullptr);
+            fn (s.getSlot (i));
     for (auto& s : masterSlots)
-        s->setPlugin (nullptr);
+        fn (*s);
+    fn (*reverbSlot);
 }
 
 bool RackProcessor::isBusesLayoutSupported (const BusesLayout& layout) const
@@ -58,6 +65,7 @@ void RackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamples
         s.prepare (sampleRate, maxBlock);
     for (auto& s : masterSlots)
         s->prepare (sampleRate, maxBlock);
+    reverbSlot->prepare (sampleRate, maxBlock);
 
     mix.setSize (2, maxBlock);
     send.setSize (2, maxBlock);
@@ -134,8 +142,21 @@ void RackProcessor::processChunk (const float* const* inputs, int numInputs, flo
     rp.wetLevel = 1.0f;
     rp.dryLevel = 0.0f;
     rp.width = 1.0f;
-    reverb.setParameters (rp);
-    reverb.processStereo (sendL, sendR, n);
+    if (reverbSlot->hasPlugin())
+    {
+        // Wet-only bus: if the plugin is bypassed (or mid-swap) return nothing rather than
+        // the dry send, which would double the channels.
+        if (! reverbSlot->process (sendL, sendR, n))
+        {
+            juce::FloatVectorOperations::clear (sendL, n);
+            juce::FloatVectorOperations::clear (sendR, n);
+        }
+    }
+    else
+    {
+        reverb.setParameters (rp);
+        reverb.processStereo (sendL, sendR, n);
+    }
     verbReturn.setTargetValue (dbToGainWithOff (m.verbReturn->load()));
     for (int i = 0; i < n; ++i)
     {
@@ -203,14 +224,9 @@ void RackProcessor::setStripName (int i, const juce::String& name)
 
 PluginSlot* RackProcessor::findSlot (const juce::String& id)
 {
-    for (auto& s : strips)
-        for (int i = 0; i < slotsPerStrip; ++i)
-            if (s.getSlot (i).getId() == id)
-                return &s.getSlot (i);
-    for (auto& s : masterSlots)
-        if (s->getId() == id)
-            return s.get();
-    return nullptr;
+    PluginSlot* found = nullptr;
+    forEachSlot ([&] (PluginSlot& s) { if (s.getId() == id) found = &s; });
+    return found;
 }
 
 bool RackProcessor::loadPlugin (PluginSlot& slot, const juce::PluginDescription* desc, juce::String& error)
@@ -258,11 +274,7 @@ juce::ValueTree RackProcessor::createStateTree()
         slotsTree.appendChild (s, nullptr);
     };
 
-    for (auto& s : strips)
-        for (int i = 0; i < slotsPerStrip; ++i)
-            addSlot (s.getSlot (i));
-    for (auto& s : masterSlots)
-        addSlot (*s);
+    forEachSlot (addSlot);
 
     tree.appendChild (slotsTree, nullptr);
     return tree;
@@ -280,11 +292,7 @@ void RackProcessor::restoreStateTree (const juce::ValueTree& source)
 
     // Clear every insert, then load the ones saved in this state.
     juce::String error;
-    for (auto& s : strips)
-        for (int i = 0; i < slotsPerStrip; ++i)
-            loadPlugin (s.getSlot (i), nullptr, error);
-    for (auto& s : masterSlots)
-        loadPlugin (*s, nullptr, error);
+    forEachSlot ([&] (PluginSlot& s) { loadPlugin (s, nullptr, error); });
 
     for (const auto& s : slotsTree)
     {

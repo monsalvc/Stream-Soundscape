@@ -29,8 +29,12 @@ public:
 
     std::atomic<bool> bypassed { false };
 
-    // Audio thread.
-    void process (float* L, float* R, int n) noexcept;
+    // Any thread.
+    bool hasPlugin() const noexcept { return loaded.load(); }
+
+    // Audio thread. Returns true if the plugin processed this block (false when the
+    // slot is empty, bypassed, or being swapped).
+    bool process (float* L, float* R, int n) noexcept;
     int getLatencySamples() const noexcept { return latency.load(); }
 
 private:
@@ -44,5 +48,6 @@ private:
     double fs = 48000.0;
     int maxBlock = 512;
     std::atomic<int> latency { 0 };
+    std::atomic<bool> loaded { false };
 };
 } // namespace sr

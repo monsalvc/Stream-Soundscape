@@ -48,6 +48,10 @@ public:
     ChannelStrip& getStrip (int i) { return strips[(size_t) i]; }
     PluginSlot& getMasterSlot (int i) { return *masterSlots[(size_t) i]; }
 
+    // A reverb plugin loaded here replaces the built-in reverb on the send bus.
+    // It should be set to 100 % wet.
+    PluginSlot& getReverbSlot() { return *reverbSlot; }
+
     juce::String getStripName (int i) const;
     void setStripName (int i, const juce::String& name);
 
@@ -68,11 +72,13 @@ public:
 
 private:
     PluginSlot* findSlot (const juce::String& id);
+    void forEachSlot (const std::function<void (PluginSlot&)>&);
     void processChunk (const float* const* inputs, int numInputs, float* outL, float* outR, int n) noexcept;
 
     PluginHost& host;
     std::array<ChannelStrip, numStrips> strips;
     std::array<std::unique_ptr<PluginSlot>, numMasterSlots> masterSlots;
+    std::unique_ptr<PluginSlot> reverbSlot;
 
     juce::AudioBuffer<float> mix, send;
     std::array<const float*, maxInputs> inputPtrs {};

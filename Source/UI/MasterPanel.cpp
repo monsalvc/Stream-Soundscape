@@ -77,7 +77,7 @@ void LoudnessDisplay::resized()
 
 //==============================================================================
 MasterPanel::MasterPanel (RackProcessor& r, PluginWindows& windows)
-    : rack (r), loudness (r.loudness), slot1 (r, windows), slot2 (r, windows)
+    : rack (r), loudness (r.loudness), slot1 (r, windows), slot2 (r, windows), verbSlot (r, windows)
 {
     auto& state = rack.state;
 
@@ -107,10 +107,13 @@ MasterPanel::MasterPanel (RackProcessor& r, PluginWindows& windows)
 
     slot1.setSlot (&rack.getMasterSlot (0));
     slot2.setSlot (&rack.getMasterSlot (1));
+    verbSlot.setSlot (&rack.getReverbSlot());
+    verbSlot.setEmptyText ("Built-in reverb (click to load a plugin)");
+    verbSlot.setTooltip ("Load a reverb plugin (set it to 100% wet) to replace the built-in reverb");
 
     for (auto* c : std::initializer_list<juce::Component*> { &compOn, &compThr, &compRatio, &compAtk, &compRel,
                                                              &compMakeup, &verbSize, &verbDamp, &verbReturn, &limOn,
-                                                             &ceiling, &limRel, &slot1, &slot2 })
+                                                             &ceiling, &limRel, &slot1, &slot2, &verbSlot })
         addAndMakeVisible (c);
 }
 
@@ -119,7 +122,7 @@ void MasterPanel::setLocked (bool shouldLock)
     locked = shouldLock;
     for (auto* c : std::initializer_list<juce::Component*> { &compOn, &compThr, &compRatio, &compAtk, &compRel,
                                                              &compMakeup, &verbSize, &verbDamp, &verbReturn, &limOn,
-                                                             &ceiling, &limRel, &slot1, &slot2 })
+                                                             &ceiling, &limRel, &slot1, &slot2, &verbSlot })
         c->setVisible (! locked);
     resized();
     repaint();
@@ -129,6 +132,7 @@ void MasterPanel::refresh()
 {
     slot1.refresh();
     slot2.refresh();
+    verbSlot.refresh();
 }
 
 void MasterPanel::tick()
@@ -204,8 +208,12 @@ void MasterPanel::resized()
     }
     r.removeFromTop (6);
 
-    verbArea = r.removeFromTop (20 + rowH + 4);
-    layoutRow (verbArea.reduced (6, 0).withTrimmedTop (20).withHeight (rowH), { &verbSize, &verbDamp, &verbReturn }, knob);
+    verbArea = r.removeFromTop (20 + rowH + 34);
+    {
+        auto a = verbArea.reduced (6, 0).withTrimmedTop (20);
+        layoutRow (a.removeFromTop (rowH), { &verbSize, &verbDamp, &verbReturn }, knob);
+        verbSlot.setBounds (a.removeFromTop (30).reduced (2, 3));
+    }
     r.removeFromTop (6);
 
     limArea = r.removeFromTop (24 + rowH + 6);

@@ -70,7 +70,7 @@ void SlotButton::refresh()
 {
     if (slot == nullptr || slot->getPlugin() == nullptr)
     {
-        setButtonText ("+ insert");
+        setButtonText (emptyText);
         setColour (juce::TextButton::buttonColourId, colours::panelRaised);
         setColour (juce::TextButton::textColourOffId, colours::dim);
         return;

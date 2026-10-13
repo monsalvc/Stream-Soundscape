@@ -28,6 +28,7 @@ public:
     SlotButton (RackProcessor&, PluginWindows&);
 
     void setSlot (PluginSlot* newSlot);
+    void setEmptyText (const juce::String& newText) { emptyText = newText; refresh(); }
     void refresh();
 
 private:
@@ -38,5 +39,6 @@ private:
     RackProcessor& rack;
     PluginWindows& windows;
     PluginSlot* slot = nullptr;
+    juce::String emptyText { "+ insert" };
 };
 } // namespace sr::ui

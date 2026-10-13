@@ -54,6 +54,7 @@ std::unique_ptr<juce::AudioPluginInstance> PluginSlot::setPlugin (std::unique_pt
         std::swap (plugin, newPlugin);
         std::swap (buffer, newBuffer);
         latency = plugin != nullptr ? plugin->getLatencySamples() : 0;
+        loaded = plugin != nullptr;
     }
 
     if (newPlugin != nullptr)
@@ -62,16 +63,16 @@ std::unique_ptr<juce::AudioPluginInstance> PluginSlot::setPlugin (std::unique_pt
     return newPlugin;
 }
 
-void PluginSlot::process (float* L, float* R, int n) noexcept
+bool PluginSlot::process (float* L, float* R, int n) noexcept
 {
     const juce::SpinLock::ScopedTryLockType sl (lock);
     if (! sl.isLocked() || plugin == nullptr || n > buffer.getNumSamples())
-        return;
+        return false;
 
     latency = plugin->getLatencySamples();
 
     if (bypassed)
-        return;
+        return false;
 
     const int numIn = plugin->getMainBusNumInputChannels();
     const int numOut = plugin->getMainBusNumOutputChannels();
@@ -102,5 +103,7 @@ void PluginSlot::process (float* L, float* R, int n) noexcept
         juce::FloatVectorOperations::copy (L, buffer.getReadPointer (0), n);
         juce::FloatVectorOperations::copy (R, buffer.getReadPointer (0), n);
     }
+
+    return true;
 }
 } // namespace sr
