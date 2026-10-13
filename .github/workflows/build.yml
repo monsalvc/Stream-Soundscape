@@ -1,0 +1,48 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test engine
+        run: ./build/StreamRackTests_artefacts/Release/StreamRackTests
+
+      - name: Package app
+        run: |
+          mkdir -p dist
+          ditto -c -k --keepParent build/StreamRack_artefacts/Release/StreamRack.app dist/StreamRack-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StreamRack-macOS
+          path: dist/StreamRack-macOS.zip
+
+  linux-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libfreetype-dev libfontconfig1-dev \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev libgl-dev libxext-dev
+
+      - name: Build and test engine
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target StreamRackTests
+          ./build/StreamRackTests_artefacts/Release/StreamRackTests
