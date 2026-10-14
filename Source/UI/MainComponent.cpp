@@ -313,7 +313,7 @@ void MainComponent::showScenesMenu()
 
         if (result == 1)
         {
-            safeThis->askForText ("Save scene", "Name for this scene (e.g. Sunday 10am, Speaking only)", false,
+            safeThis->askForText ("Save scene", "Name for this scene (e.g. Sabbath Worship, Sabbath School)", false,
                                   [safeThis] (juce::String name)
             {
                 if (safeThis != nullptr && name.trim().isNotEmpty())

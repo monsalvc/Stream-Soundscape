@@ -30,7 +30,7 @@ WING ── WING-DANTE card ── network ── Mac in the multimedia room
 - **Loudness meter** (ITU-R BS.1770 / EBU R128): momentary, short-term and integrated loudness
   against the -14 LUFS YouTube target. Green means on target, amber means quiet, red means hot.
 - **Scenes:** save and recall full snapshots (names, settings and plugins), for example
-  "Sunday 10am" or "Speaking only". They are stored in `~/Documents/StreamRack Scenes`.
+  "Sabbath Worship" or "Sabbath School". They are stored in `~/Documents/StreamRack Scenes`.
 - **Lock mode for volunteers:** a PIN-protected view that shows only channel names, faders, mutes,
   meters, loudness and scene recall. Lock mode survives a restart.
 - Everything autosaves every 30 seconds and on quit, and comes back on the next launch.
@@ -97,7 +97,7 @@ Click **Plugins... → Options... → Scan for new or updated VST3 plug-ins** (a
 runs inside the app; if a plugin crashes the scan, relaunch and scan again and that plugin will be
 skipped. Then click any **+ insert** button to load one.
 
-### 4. Lock it for Sunday
+### 4. Lock it for Sabbath
 
 Name the channels (double-click a name), set the mix, save a scene, then click **Lock** and choose
 a PIN. Volunteers get the simple view. **Unlock** asks for the PIN.
