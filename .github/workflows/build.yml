@@ -16,7 +16,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DSTREAMRACK_LTO=OFF
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel "$(sysctl -n hw.ncpu)"
 
       - name: Test engine
         run: ./build/StreamRackTests_artefacts/Release/StreamRackTests
