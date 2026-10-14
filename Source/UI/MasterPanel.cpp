@@ -76,22 +76,14 @@ void LoudnessDisplay::resized()
 }
 
 //==============================================================================
-MasterPanel::MasterPanel (RackProcessor& r, PluginWindows& windows)
-    : rack (r), loudness (r.loudness), slot1 (r, windows), slot2 (r, windows), verbSlot (r, windows)
+MasterControls::MasterControls (RackProcessor& r, PluginWindows& windows) : rack (r), verbSlot (r, windows)
 {
     auto& state = rack.state;
-
-    addAndMakeVisible (loudness);
-    addAndMakeVisible (meterL);
-    addAndMakeVisible (meterR);
-
-    fader.setSliderStyle (juce::Slider::LinearVertical);
-    fader.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 18);
-    fader.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-    faderAttachment = std::make_unique<Apvts::SliderAttachment> (state, masterId ("fader"), fader);
-    fader.setDoubleClickReturnValue (true, 0.0);
-    addAndMakeVisible (fader);
-
+    levOn.attach (state, masterId ("levOn"));
+    levOn.setTooltip ("Automatically rides the overall level toward the target, within the range");
+    levTarget.attach (state, masterId ("levTarget"));
+    levRange.attach (state, masterId ("levRange"));
+    levSpeed.attach (state, masterId ("levSpeed"));
     compOn.attach (state, masterId ("compOn"));
     compThr.attach (state, masterId ("compThr"));
     compRatio.attach (state, masterId ("compRatio"));
@@ -105,47 +97,186 @@ MasterPanel::MasterPanel (RackProcessor& r, PluginWindows& windows)
     ceiling.attach (state, masterId ("ceiling"));
     limRel.attach (state, masterId ("limRel"));
 
-    slot1.setSlot (&rack.getMasterSlot (0));
-    slot2.setSlot (&rack.getMasterSlot (1));
     verbSlot.setSlot (&rack.getReverbSlot());
     verbSlot.setEmptyText ("Built-in reverb (click to load a plugin)");
     verbSlot.setTooltip ("Load a reverb plugin (set it to 100% wet) to replace the built-in reverb");
 
-    for (auto* c : std::initializer_list<juce::Component*> { &compOn, &compThr, &compRatio, &compAtk, &compRel,
-                                                             &compMakeup, &verbSize, &verbDamp, &verbReturn, &limOn,
-                                                             &ceiling, &limRel, &slot1, &slot2, &verbSlot })
+    for (int i = 0; i < numMasterSlots; ++i)
+    {
+        auto* b = inserts.add (new SlotButton (rack, windows));
+        b->setSlot (&rack.getMasterSlot (i));
+        b->setEmptyText ("+ insert " + juce::String (i + 1));
+        addAndMakeVisible (b);
+    }
+
+    for (auto* c : std::initializer_list<juce::Component*> { &levOn, &levTarget, &levRange, &levSpeed, &compOn,
+                                                             &compThr, &compRatio, &compAtk, &compRel, &compMakeup,
+                                                             &verbSize, &verbDamp, &verbReturn, &verbSlot, &limOn,
+                                                             &ceiling, &limRel })
         addAndMakeVisible (c);
+}
+
+void MasterControls::setBusMode (bool shouldBeBusMode)
+{
+    busMode = shouldBeBusMode;
+    for (auto* c : std::initializer_list<juce::Component*> { &verbSize, &verbDamp, &verbReturn, &verbSlot })
+        c->setVisible (! busMode);
+}
+
+void MasterControls::refresh()
+{
+    verbSlot.refresh();
+    for (auto* b : inserts)
+        b->refresh();
+}
+
+void MasterControls::tick()
+{
+    const float gain = rack.levelerGainDb.load();
+    if (std::abs (gain - levelerGain) > 0.05f)
+    {
+        levelerGain = gain;
+        repaint (levMeterArea);
+    }
+}
+
+int MasterControls::layout (int width)
+{
+    constexpr int knob = 64, rowH = 80, gap = 6;
+    auto r = juce::Rectangle<int> (0, 0, width, 10000);
+
+    auto section = [&] (int height)
+    {
+        auto a = r.removeFromTop (height);
+        r.removeFromTop (gap);
+        return a;
+    };
+
+    levArea = section (24 + rowH + 22);
+    {
+        auto a = levArea.reduced (6, 4);
+        levOn.setBounds (a.removeFromTop (22).removeFromLeft (90));
+        a.removeFromTop (2);
+        layoutRow (a.removeFromTop (rowH), { &levTarget, &levRange, &levSpeed }, knob);
+        levMeterArea = a.removeFromTop (16).reduced (2, 3);
+    }
+
+    compArea = section (24 + 2 * rowH + 6);
+    {
+        auto a = compArea.reduced (6, 4);
+        compOn.setBounds (a.removeFromTop (22).removeFromLeft (90));
+        a.removeFromTop (2);
+        layoutRow (a.removeFromTop (rowH), { &compThr, &compRatio, &compMakeup }, knob);
+        layoutRow (a.removeFromTop (rowH), { &compAtk, &compRel }, knob);
+    }
+
+    if (busMode)
+    {
+        verbArea = {};
+    }
+    else
+    {
+        verbArea = section (20 + rowH + 34);
+        auto a = verbArea.reduced (6, 0).withTrimmedTop (20);
+        layoutRow (a.removeFromTop (rowH), { &verbSize, &verbDamp, &verbReturn }, knob);
+        verbSlot.setBounds (a.removeFromTop (30).reduced (2, 3));
+    }
+
+    limArea = section (24 + rowH + 6);
+    {
+        auto a = limArea.reduced (6, 4);
+        limOn.setBounds (a.removeFromTop (22).removeFromLeft (90));
+        a.removeFromTop (2);
+        layoutRow (a.removeFromTop (rowH), { &ceiling, &limRel }, knob);
+    }
+
+    insertArea = section (20 + numMasterSlots * 30 + 8);
+    {
+        auto a = insertArea.reduced (8, 0).withTrimmedTop (20);
+        for (auto* b : inserts)
+            b->setBounds (a.removeFromTop (30).reduced (0, 2));
+    }
+
+    return r.getY();
+}
+
+void MasterControls::paint (juce::Graphics& g)
+{
+    drawSection (g, levArea, "");
+    drawSection (g, compArea, "");
+    if (! verbArea.isEmpty())
+        drawSection (g, verbArea, "REVERB BUS");
+    drawSection (g, limArea, "");
+    drawSection (g, insertArea, "MASTER INSERTS (in order)");
+
+    // Leveler activity: a bar from the centre, right = boosting, left = cutting.
+    auto bar = levMeterArea.toFloat();
+    g.setColour (colours::background);
+    g.fillRoundedRectangle (bar, 3.0f);
+    const float range = juce::jmax (1.0f, rack.state.getRawParameterValue (masterId ("levRange"))->load());
+    const float frac = juce::jlimit (-1.0f, 1.0f, levelerGain / range);
+    const float cx = bar.getCentreX();
+    g.setColour (levelerGain >= 0 ? colours::green : colours::amber);
+    g.fillRect (frac >= 0 ? juce::Rectangle<float> (cx, bar.getY(), frac * bar.getWidth() * 0.5f, bar.getHeight())
+                          : juce::Rectangle<float> (cx + frac * bar.getWidth() * 0.5f, bar.getY(),
+                                                    -frac * bar.getWidth() * 0.5f, bar.getHeight()));
+    g.setColour (colours::text.withAlpha (0.6f));
+    g.fillRect (cx - 0.5f, bar.getY() - 2.0f, 1.0f, bar.getHeight() + 4.0f);
+}
+
+//==============================================================================
+MasterPanel::MasterPanel (RackProcessor& r, PluginWindows& windows)
+    : rack (r), loudness (r.loudness), controls (r, windows)
+{
+    addAndMakeVisible (loudness);
+    addAndMakeVisible (meterL);
+    addAndMakeVisible (meterR);
+
+    fader.setSliderStyle (juce::Slider::LinearVertical);
+    fader.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 18);
+    fader.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    faderAttachment = std::make_unique<Apvts::SliderAttachment> (rack.state, masterId ("fader"), fader);
+    fader.setDoubleClickReturnValue (true, 0.0);
+    addAndMakeVisible (fader);
+
+    viewport.setViewedComponent (&controls, false);
+    viewport.setScrollBarsShown (true, false);
+    viewport.setScrollBarThickness (8);
+    addAndMakeVisible (viewport);
 }
 
 void MasterPanel::setLocked (bool shouldLock)
 {
     locked = shouldLock;
-    for (auto* c : std::initializer_list<juce::Component*> { &compOn, &compThr, &compRatio, &compAtk, &compRel,
-                                                             &compMakeup, &verbSize, &verbDamp, &verbReturn, &limOn,
-                                                             &ceiling, &limRel, &slot1, &slot2, &verbSlot })
-        c->setVisible (! locked);
+    viewport.setVisible (! locked);
     resized();
     repaint();
 }
 
-void MasterPanel::refresh()
+void MasterPanel::setBusMode (bool busMode)
 {
-    slot1.refresh();
-    slot2.refresh();
-    verbSlot.refresh();
+    controls.setBusMode (busMode);
+    resized();
+    repaint();
 }
+
+void MasterPanel::refresh() { controls.refresh(); }
 
 void MasterPanel::tick()
 {
     loudness.tick();
+    controls.tick();
     meterL.setLevel (rack.masterPeakL.exchange (0.0f));
     meterR.setLevel (rack.masterPeakR.exchange (0.0f));
 
-    const float lim = rack.limiterReductionDb.load(), bus = rack.busCompReductionDb.load();
-    if (std::abs (lim - limiterReduction) > 0.1f || std::abs (bus - busReduction) > 0.1f)
+    const float lim = rack.limiterReductionDb.load(), bus = rack.busCompReductionDb.load(),
+                lev = rack.levelerGainDb.load();
+    if (std::abs (lim - limiterReduction) > 0.1f || std::abs (bus - busReduction) > 0.1f
+        || std::abs (lev - levelerGain) > 0.1f)
     {
         limiterReduction = lim;
         busReduction = bus;
+        levelerGain = lev;
         repaint (grArea);
     }
 }
@@ -154,25 +285,20 @@ void MasterPanel::paint (juce::Graphics& g)
 {
     g.fillAll (colours::panel);
 
-    if (! locked)
-    {
-        drawSection (g, compArea, "");
-        drawSection (g, verbArea, "REVERB BUS");
-        drawSection (g, limArea, "");
-        drawSection (g, insertArea, "MASTER INSERTS");
-    }
-
-    // Gain reduction readouts under the meters.
+    // Gain readouts under the meters: leveler (+/-), bus compressor and limiter reduction.
     g.setFont (juce::FontOptions (11.0f));
     auto r = grArea;
-    g.setColour (colours::dim);
-    g.drawText ("LIM", r.removeFromLeft (28), juce::Justification::centredLeft);
-    g.setColour (limiterReduction < -0.1f ? colours::amber : colours::dim);
-    g.drawText (juce::String (limiterReduction, 1), r.removeFromLeft (40), juce::Justification::centredLeft);
-    g.setColour (colours::dim);
-    g.drawText ("BUS", r.removeFromLeft (28), juce::Justification::centredLeft);
-    g.setColour (busReduction < -0.1f ? colours::amber : colours::dim);
-    g.drawText (juce::String (busReduction, 1), r, juce::Justification::centredLeft);
+    const auto item = [&] (const juce::String& label, float value, bool active)
+    {
+        g.setColour (colours::dim);
+        g.drawText (label, r.removeFromLeft (28), juce::Justification::centredLeft);
+        g.setColour (active ? colours::amber : colours::dim);
+        g.drawText ((value > 0.05f ? "+" : "") + juce::String (value, 1), r.removeFromLeft (44),
+                    juce::Justification::centredLeft);
+    };
+    item ("LEV", levelerGain, std::abs (levelerGain) > 0.1f);
+    item ("BUS", busReduction, busReduction < -0.1f);
+    item ("LIM", limiterReduction, limiterReduction < -0.1f);
 }
 
 void MasterPanel::resized()
@@ -183,7 +309,7 @@ void MasterPanel::resized()
 
     grArea = r.removeFromBottom (18);
 
-    // Master fader and stereo meter on the left.
+    // Master fader and stereo meter on the left (centred when locked).
     auto left = locked ? r.withSizeKeepingCentre (140, r.getHeight()) : r.removeFromLeft (104);
     auto meters = left.removeFromRight (26);
     meterL.setBounds (meters.removeFromLeft (12).withTrimmedBottom (22));
@@ -195,41 +321,9 @@ void MasterPanel::resized()
         return;
 
     r.removeFromLeft (8);
-    constexpr int knob = 66, rowH = 80;
-
-    compArea = r.removeFromTop (20 + 2 * rowH + 8);
-    {
-        auto a = compArea.reduced (6, 4);
-        auto header = a.removeFromTop (22);
-        compOn.setBounds (header.removeFromLeft (90));
-        a.removeFromTop (2);
-        layoutRow (a.removeFromTop (rowH), { &compThr, &compRatio, &compMakeup }, knob);
-        layoutRow (a.removeFromTop (rowH), { &compAtk, &compRel }, knob);
-    }
-    r.removeFromTop (6);
-
-    verbArea = r.removeFromTop (20 + rowH + 34);
-    {
-        auto a = verbArea.reduced (6, 0).withTrimmedTop (20);
-        layoutRow (a.removeFromTop (rowH), { &verbSize, &verbDamp, &verbReturn }, knob);
-        verbSlot.setBounds (a.removeFromTop (30).reduced (2, 3));
-    }
-    r.removeFromTop (6);
-
-    limArea = r.removeFromTop (24 + rowH + 6);
-    {
-        auto a = limArea.reduced (6, 4);
-        limOn.setBounds (a.removeFromTop (22).removeFromLeft (90));
-        a.removeFromTop (2);
-        layoutRow (a.removeFromTop (rowH), { &ceiling, &limRel }, knob);
-    }
-    r.removeFromTop (6);
-
-    insertArea = r.removeFromTop (20 + 2 * 30 + 8);
-    {
-        auto a = insertArea.reduced (8, 0).withTrimmedTop (20);
-        slot1.setBounds (a.removeFromTop (30).reduced (0, 2));
-        slot2.setBounds (a.removeFromTop (30).reduced (0, 2));
-    }
+    viewport.setBounds (r);
+    const int needed = controls.layout (r.getWidth());
+    const int width = needed > r.getHeight() ? r.getWidth() - viewport.getScrollBarThickness() : r.getWidth();
+    controls.setSize (width, controls.layout (width));
 }
 } // namespace sr::ui

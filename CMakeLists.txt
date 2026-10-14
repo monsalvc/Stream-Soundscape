@@ -52,6 +52,7 @@ target_sources(StreamRack PRIVATE
     Source/Main.cpp
     Source/UI/MainComponent.cpp
     Source/UI/StripComponent.cpp
+    Source/UI/BusPanel.cpp
     Source/UI/DetailPanel.cpp
     Source/UI/MasterPanel.cpp
     Source/UI/PluginUi.cpp)

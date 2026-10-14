@@ -12,6 +12,12 @@ namespace
     const juce::Identifier descTag ("PLUGIN");
 
     juce::Identifier nameProp (int strip) { return "name" + juce::String (strip); }
+
+    float peakOf (const float* data, int n) noexcept
+    {
+        return juce::jmax (juce::FloatVectorOperations::findMaximum (data, n),
+                           -juce::FloatVectorOperations::findMinimum (data, n));
+    }
 } // namespace
 
 RackProcessor::RackProcessor (PluginHost& h)
@@ -31,7 +37,8 @@ RackProcessor::RackProcessor (PluginHost& h)
     auto get = [this] (const char* name) { return state.getRawParameterValue (masterId (name)); };
     m = { get ("compOn"),   get ("compThr"),  get ("compRatio"),  get ("compAtk"), get ("compRel"),
           get ("compMakeup"), get ("verbSize"), get ("verbDamp"), get ("verbReturn"), get ("limOn"),
-          get ("ceiling"),  get ("limRel"),   get ("fader") };
+          get ("ceiling"),  get ("limRel"),   get ("fader"),    get ("busMode"), get ("busSrc"),
+          get ("busTrim"),  get ("levOn"),    get ("levTarget"), get ("levRange"), get ("levSpeed") };
 }
 
 RackProcessor::~RackProcessor()
@@ -73,6 +80,8 @@ void RackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamples
     reverb.reset();
     busComp.prepare (sampleRate);
     limiter.prepare (sampleRate);
+    leveler.prepare (sampleRate);
+    busTrim.reset (sampleRate, 0.05);
     loudness.prepare (sampleRate);
     masterGain.reset (sampleRate, 0.05);
     verbReturn.reset (sampleRate, 0.05);
@@ -128,42 +137,73 @@ void RackProcessor::processChunk (const float* const* inputs, int numInputs, flo
     juce::FloatVectorOperations::clear (sendL, n);
     juce::FloatVectorOperations::clear (sendR, n);
 
-    int compensation = 0;
-    for (auto& s : strips)
-        compensation = juce::jmax (compensation, s.getLatencySamples());
-
-    for (auto& s : strips)
-        s.process (inputs, numInputs, n, compensation, outL, outR, sendL, sendR);
-
-    // Reverb bus (wet only), returned into the mix.
-    juce::Reverb::Parameters rp;
-    rp.roomSize = m.verbSize->load();
-    rp.damping = m.verbDamp->load();
-    rp.wetLevel = 1.0f;
-    rp.dryLevel = 0.0f;
-    rp.width = 1.0f;
-    if (reverbSlot->hasPlugin())
+    if (m.busMode->load() > 0.5f)
     {
-        // Wet-only bus: if the plugin is bypassed (or mid-swap) return nothing rather than
-        // the dry send, which would double the channels.
-        if (! reverbSlot->process (sendL, sendR, n))
+        // Bus mode: the selected input pair is the mix.
+        const int first = (int) m.busSrc->load() * 2;
+        if (first < numInputs)
         {
-            juce::FloatVectorOperations::clear (sendL, n);
-            juce::FloatVectorOperations::clear (sendR, n);
+            juce::FloatVectorOperations::copy (outL, inputs[first], n);
+            juce::FloatVectorOperations::copy (outR, inputs[first + 1 < numInputs ? first + 1 : first], n);
         }
+
+        busTrim.setTargetValue (juce::Decibels::decibelsToGain (m.busTrim->load()));
+        for (int i = 0; i < n; ++i)
+        {
+            const float g = busTrim.getNextValue();
+            outL[i] *= g;
+            outR[i] *= g;
+        }
+
+        const float pl = peakOf (outL, n), pr = peakOf (outR, n);
+        if (pl > busInPeakL.load())
+            busInPeakL = pl;
+        if (pr > busInPeakR.load())
+            busInPeakR = pr;
     }
     else
     {
-        reverb.setParameters (rp);
-        reverb.processStereo (sendL, sendR, n);
+        int compensation = 0;
+        for (auto& s : strips)
+            compensation = juce::jmax (compensation, s.getLatencySamples());
+
+        for (auto& s : strips)
+            s.process (inputs, numInputs, n, compensation, outL, outR, sendL, sendR);
+
+        // Reverb bus (wet only), returned into the mix.
+        juce::Reverb::Parameters rp;
+        rp.roomSize = m.verbSize->load();
+        rp.damping = m.verbDamp->load();
+        rp.wetLevel = 1.0f;
+        rp.dryLevel = 0.0f;
+        rp.width = 1.0f;
+        if (reverbSlot->hasPlugin())
+        {
+            // Wet-only bus: if the plugin is bypassed (or mid-swap) return nothing rather than
+            // the dry send, which would double the channels.
+            if (! reverbSlot->process (sendL, sendR, n))
+            {
+                juce::FloatVectorOperations::clear (sendL, n);
+                juce::FloatVectorOperations::clear (sendR, n);
+            }
+        }
+        else
+        {
+            reverb.setParameters (rp);
+            reverb.processStereo (sendL, sendR, n);
+        }
+        verbReturn.setTargetValue (dbToGainWithOff (m.verbReturn->load()));
+        for (int i = 0; i < n; ++i)
+        {
+            const float g = verbReturn.getNextValue();
+            outL[i] += sendL[i] * g;
+            outR[i] += sendR[i] * g;
+        }
     }
-    verbReturn.setTargetValue (dbToGainWithOff (m.verbReturn->load()));
-    for (int i = 0; i < n; ++i)
-    {
-        const float g = verbReturn.getNextValue();
-        outL[i] += sendL[i] * g;
-        outR[i] += sendR[i] * g;
-    }
+
+    leveler.process (outL, outR, n, m.levOn->load() > 0.5f, m.levTarget->load(), m.levRange->load(),
+                     m.levSpeed->load());
+    levelerGainDb = leveler.getGainDb();
 
     // Master bus.
     if (m.compOn->load() > 0.5f)
@@ -200,14 +240,11 @@ void RackProcessor::processChunk (const float* const* inputs, int numInputs, flo
 
     loudness.process (outL, outR, n);
 
-    const float pl = juce::FloatVectorOperations::findMaximum (outL, n);
-    const float nl = -juce::FloatVectorOperations::findMinimum (outL, n);
-    const float pr = juce::FloatVectorOperations::findMaximum (outR, n);
-    const float nr = -juce::FloatVectorOperations::findMinimum (outR, n);
-    if (juce::jmax (pl, nl) > masterPeakL.load())
-        masterPeakL = juce::jmax (pl, nl);
-    if (juce::jmax (pr, nr) > masterPeakR.load())
-        masterPeakR = juce::jmax (pr, nr);
+    const float pl = peakOf (outL, n), pr = peakOf (outR, n);
+    if (pl > masterPeakL.load())
+        masterPeakL = pl;
+    if (pr > masterPeakR.load())
+        masterPeakR = pr;
 }
 
 //==============================================================================

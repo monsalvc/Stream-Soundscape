@@ -1,13 +1,16 @@
 #pragma once
 
 #include "ChannelStrip.h"
+#include "Leveler.h"
 #include "LoudnessMeter.h"
 #include "PluginHost.h"
 
 namespace sr
 {
-// The whole engine: up to 64 Dante inputs in, 24 channel strips, a reverb bus and a
-// master bus (bus compressor -> inserts -> fader -> limiter), stereo stream mix out.
+// The whole engine: up to 64 Dante inputs in, stereo stream mix out.
+// Bus mode: one stereo input pair (the console's stream bus) -> master chain.
+// Advanced mode: 24 channel strips + reverb bus -> master chain.
+// Master chain: leveler -> bus compressor -> inserts -> fader -> limiter.
 // It is an AudioProcessor so it can be driven by juce::AudioProcessorPlayer and keep
 // its settings in an AudioProcessorValueTreeState.
 class RackProcessor : public juce::AudioProcessor
@@ -68,7 +71,8 @@ public:
     // Metering, read by the UI.
     LoudnessMeter loudness;
     std::atomic<float> masterPeakL { 0.0f }, masterPeakR { 0.0f }; // UI resets after reading
-    std::atomic<float> limiterReductionDb { 0.0f }, busCompReductionDb { 0.0f };
+    std::atomic<float> limiterReductionDb { 0.0f }, busCompReductionDb { 0.0f }, levelerGainDb { 0.0f };
+    std::atomic<float> busInPeakL { 0.0f }, busInPeakR { 0.0f }; // bus mode input, UI resets after reading
 
 private:
     PluginSlot* findSlot (const juce::String& id);
@@ -85,13 +89,15 @@ private:
     juce::Reverb reverb;
     Compressor busComp;
     Limiter limiter;
-    juce::SmoothedValue<float> masterGain, verbReturn;
+    Leveler leveler;
+    juce::SmoothedValue<float> masterGain, verbReturn, busTrim;
     int maxBlock = 512;
 
     struct MasterRefs
     {
         std::atomic<float>*compOn, *compThr, *compRatio, *compAtk, *compRel, *compMakeup, *verbSize, *verbDamp,
-            *verbReturn, *limOn, *ceiling, *limRel, *fader;
+            *verbReturn, *limOn, *ceiling, *limRel, *fader, *busMode, *busSrc, *busTrim, *levOn, *levTarget,
+            *levRange, *levSpeed;
     } m {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RackProcessor)

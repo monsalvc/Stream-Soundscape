@@ -2,6 +2,7 @@
 
 #include "Engine/Dsp.h"
 #include "Engine/LoudnessMeter.h"
+#include "Engine/Leveler.h"
 #include "Engine/RackProcessor.h"
 #include <cstdio>
 
@@ -138,7 +139,9 @@ void testEngine()
     rack.setPlayConfigDetails (numIn, 2, fs, block);
     rack.prepareToPlay (fs, block);
 
-    // Channel 1 (input 1) at 0 dB fader, centre; everything else at -inf.
+    // Advanced mode, leveler off. Channel 1 (input 1) at 0 dB fader, centre; everything else at -inf.
+    setParam (rack, sr::masterId ("busMode"), 0.0f);
+    setParam (rack, sr::masterId ("levOn"), 0.0f);
     setParam (rack, sr::stripId (0, "fader"), 0.0f);
     setParam (rack, sr::stripId (0, "hpfOn"), 0.0f);
     setParam (rack, sr::stripId (0, "eqOn"), 0.0f);
@@ -190,6 +193,96 @@ void testEngine()
     const float restored = rack.state.getRawParameterValue (sr::stripId (2, "lowGain"))->load();
     check (std::abs (restored - 3.5f) < 0.01f && rack.getStripName (2) == "Pastor", "engine: state save/restore", restored);
 }
+void runSine (sr::Leveler& lev, sr::LoudnessMeter* meter, float amplitudeDb, float seconds, double& phase,
+              float target, float range)
+{
+    const float amp = juce::Decibels::decibelsToGain (amplitudeDb);
+    std::vector<float> L (480), R (480);
+    for (int block = 0; block < (int) (seconds * 100); ++block)
+    {
+        for (size_t i = 0; i < L.size(); ++i)
+        {
+            L[i] = R[i] = amp * (float) std::sin (phase);
+            phase += juce::MathConstants<double>::twoPi * 1000.0 / fs;
+        }
+        lev.process (L.data(), R.data(), (int) L.size(), true, target, range, 2.0f);
+        if (meter != nullptr)
+            meter->process (L.data(), R.data(), (int) L.size());
+    }
+}
+
+void testLeveler()
+{
+    // A -30 LUFS programme is brought up to a -16 LUFS target when the range allows it...
+    sr::Leveler lev;
+    lev.prepare (fs);
+    sr::LoudnessMeter meter;
+    meter.prepare (fs);
+    double phase = 0;
+    runSine (lev, nullptr, -30.0f, 30.0f, phase, -16.0f, 18.0f);
+    runSine (lev, &meter, -30.0f, 5.0f, phase, -16.0f, 18.0f);
+    check (std::abs (meter.shortTerm.load() + 16.0f) < 0.5f, "leveler: brings -30 LUFS up to -16 LUFS target", meter.shortTerm.load());
+
+    // ...but never by more than its range.
+    sr::Leveler limited;
+    limited.prepare (fs);
+    runSine (limited, nullptr, -30.0f, 30.0f, phase, -16.0f, 9.0f);
+    check (std::abs (limited.getGainDb() - 9.0f) < 0.2f, "leveler: boost capped at +9 dB range", limited.getGainDb());
+
+    // Silence (below the gate) holds the gain instead of pumping it up.
+    const float before = lev.getGainDb();
+    runSine (lev, nullptr, -100.0f, 10.0f, phase, -16.0f, 18.0f);
+    check (std::abs (lev.getGainDb() - before) < 1.0f, "leveler: holds gain through silence", lev.getGainDb() - before);
+
+    // When the same programme returns after the pause, it doesn't surge.
+    float maxGain = -100.0f;
+    for (int s = 0; s < 10; ++s)
+    {
+        runSine (lev, nullptr, -30.0f, 1.0f, phase, -16.0f, 18.0f);
+        maxGain = juce::jmax (maxGain, lev.getGainDb());
+    }
+    check (maxGain < before + 1.5f, "leveler: no surge when music resumes after a pause", maxGain - before);
+
+    // A loud section is turned down.
+    sr::Leveler down;
+    down.prepare (fs);
+    runSine (down, nullptr, -6.0f, 30.0f, phase, -16.0f, 18.0f);
+    check (std::abs (down.getGainDb() + 10.0f) < 0.5f, "leveler: turns -6 LUFS down by 10 dB", down.getGainDb());
+}
+
+void testBusMode()
+{
+    sr::PluginHost host (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("streamrack-test"));
+    sr::RackProcessor rack (host);
+    const int numIn = 8, block = 256;
+    rack.setPlayConfigDetails (numIn, 2, fs, block);
+    rack.prepareToPlay (fs, block);
+
+    // Bus on inputs 3-4, leveler and limiter off: it should pass through untouched.
+    setParam (rack, sr::masterId ("busSrc"), 1.0f);
+    setParam (rack, sr::masterId ("levOn"), 0.0f);
+    setParam (rack, sr::masterId ("limOn"), 0.0f);
+
+    juce::AudioBuffer<float> buffer (numIn, block);
+    juce::MidiBuffer midi;
+    float maxErr = 0;
+    for (int b = 0; b < 50; ++b)
+    {
+        buffer.clear();
+        for (int i = 0; i < block; ++i)
+        {
+            buffer.setSample (0, i, 0.9f); // inputs 1-2 must be ignored
+            buffer.setSample (2, i, 0.25f);
+            buffer.setSample (3, i, -0.5f);
+        }
+        rack.processBlock (buffer, midi);
+        if (b > 10)
+            for (int i = 0; i < block; ++i)
+                maxErr = juce::jmax (maxErr, std::abs (buffer.getSample (0, i) - 0.25f),
+                                     std::abs (buffer.getSample (1, i) + 0.5f));
+    }
+    check (maxErr < 1e-4f, "bus mode: inputs 3-4 pass to outputs 1-2 unchanged", maxErr);
+}
 } // namespace
 
 int main()
@@ -199,7 +292,9 @@ int main()
     testLimiter();
     testEq();
     testCompressor();
+    testLeveler();
     testEngine();
+    testBusMode();
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
 }

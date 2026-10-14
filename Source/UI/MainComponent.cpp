@@ -14,7 +14,7 @@ namespace
 } // namespace
 
 MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, juce::PropertiesFile& s)
-    : rack (r), deviceManager (dm), settings (s), detail (r, pluginWindows), master (r, pluginWindows)
+    : rack (r), deviceManager (dm), settings (s), detail (r, pluginWindows), busPanel (r), master (r, pluginWindows)
 {
     juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel); // dialogs and plugin windows too
     setLookAndFeel (&lookAndFeel);
@@ -34,6 +34,19 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
     for (auto* b : { &audioButton, &pluginsButton, &scenesButton, &lockButton })
         addAndMakeVisible (b);
 
+    // Mode switch: Bus (the stereo stream bus) or Advanced (individual channels).
+    busModeButton.setTooltip ("Bus mode: color the console's stereo stream bus");
+    advancedModeButton.setTooltip ("Advanced mode: mix and color individual channels");
+    for (auto* b : { &busModeButton, &advancedModeButton })
+    {
+        b->setClickingTogglesState (true);
+        b->setRadioGroupId (1001);
+        b->setConnectedEdges (b == &busModeButton ? juce::Button::ConnectedOnRight : juce::Button::ConnectedOnLeft);
+        addAndMakeVisible (b);
+    }
+    busModeButton.onClick = [this] { requestMode (true); };
+    advancedModeButton.onClick = [this] { requestMode (false); };
+
     for (int i = 0; i < numStrips; ++i)
         stripContainer.addAndMakeVisible (strips.add (new StripComponent (rack, i, [this] (int idx) { selectStrip (idx); })));
 
@@ -45,11 +58,13 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
     detailViewport.setScrollBarsShown (false, true);
     addChildComponent (detailViewport);
 
+    addChildComponent (busPanel);
     addAndMakeVisible (master);
 
     rack.onSlotAboutToChange = [this] (PluginSlot& slot) { pluginWindows.close (slot); };
     rack.state.state.addListener (this);
 
+    setBusMode (rack.state.getRawParameterValue (masterId ("busMode"))->load() > 0.5f);
     setLocked (settings.getBoolValue ("locked", false));
     updateStatus();
     startTimerHz (30);
@@ -86,6 +101,12 @@ void MainComponent::resized()
     auto bar = r.removeFromTop (topBarHeight).reduced (10, 7);
 
     title.setBounds (bar.removeFromLeft (120));
+    if (busModeButton.isVisible())
+    {
+        busModeButton.setBounds (bar.removeFromLeft (70));
+        advancedModeButton.setBounds (bar.removeFromLeft (90));
+        bar.removeFromLeft (16);
+    }
     for (auto* b : { &lockButton, &scenesButton, &pluginsButton, &audioButton })
     {
         if (b->isVisible())
@@ -98,7 +119,13 @@ void MainComponent::resized()
 
     master.setBounds (r.removeFromRight (MasterPanel::preferredWidth));
 
-    const bool showDetail = ! locked && selected >= 0;
+    if (busMode)
+    {
+        busPanel.setBounds (r);
+        return;
+    }
+
+    const bool showDetail = ! locked && ! busMode && selected >= 0;
     detailViewport.setVisible (showDetail);
     if (showDetail)
     {
@@ -117,10 +144,22 @@ void MainComponent::resized()
 //==============================================================================
 void MainComponent::timerCallback()
 {
-    for (auto* s : strips)
-        s->tick();
+    // The mode is a parameter, so a scene recall can change it; follow it here.
+    const bool paramBusMode = rack.state.getRawParameterValue (masterId ("busMode"))->load() > 0.5f;
+    if (paramBusMode != busMode)
+        setBusMode (paramBusMode);
+
+    if (busMode)
+    {
+        busPanel.tick();
+    }
+    else
+    {
+        for (auto* s : strips)
+            s->tick();
+        detail.tick();
+    }
     master.tick();
-    detail.tick();
 
     if (--statusCountdown <= 0)
     {
@@ -173,6 +212,25 @@ void MainComponent::selectStrip (int index)
     resized();
 }
 
+void MainComponent::requestMode (bool shouldBeBusMode)
+{
+    auto* p = rack.state.getParameter (masterId ("busMode"));
+    p->setValueNotifyingHost (shouldBeBusMode ? 1.0f : 0.0f);
+    setBusMode (shouldBeBusMode);
+}
+
+void MainComponent::setBusMode (bool shouldBeBusMode)
+{
+    busMode = shouldBeBusMode;
+    busModeButton.setToggleState (busMode, juce::dontSendNotification);
+    advancedModeButton.setToggleState (! busMode, juce::dontSendNotification);
+    busPanel.setVisible (busMode);
+    stripViewport.setVisible (! busMode);
+    master.setBusMode (busMode);
+    resized();
+    repaint();
+}
+
 void MainComponent::setLocked (bool shouldLock)
 {
     locked = shouldLock;
@@ -189,6 +247,9 @@ void MainComponent::setLocked (bool shouldLock)
     for (auto* s : strips)
         s->setLocked (locked);
     master.setLocked (locked);
+    busPanel.setLocked (locked);
+    busModeButton.setVisible (! locked);
+    advancedModeButton.setVisible (! locked);
 
     audioButton.setVisible (! locked);
     pluginsButton.setVisible (! locked);

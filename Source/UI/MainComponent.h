@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BusPanel.h"
 #include "DetailPanel.h"
 #include "MasterPanel.h"
 #include "StripComponent.h"
@@ -31,6 +32,8 @@ private:
 
     void selectStrip (int index);
     void setLocked (bool);
+    void setBusMode (bool);
+    void requestMode (bool busMode);
     void refreshAll();
     void updateStatus();
 
@@ -52,14 +55,16 @@ private:
     juce::Label title, status;
     juce::TextButton audioButton { "Audio..." }, pluginsButton { "Plugins..." }, scenesButton { "Scenes" },
         lockButton { "Lock" };
+    juce::TextButton busModeButton { "Bus" }, advancedModeButton { "Advanced" };
 
     juce::Component stripContainer;
     juce::Viewport stripViewport, detailViewport;
     juce::OwnedArray<StripComponent> strips;
     DetailPanel detail;
+    BusPanel busPanel;
     MasterPanel master;
 
-    bool locked = false;
+    bool locked = false, busMode = true;
     int selected = -1;
     int statusCountdown = 0;
 

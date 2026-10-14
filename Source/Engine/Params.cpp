@@ -129,6 +129,24 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
 
     addFader (layout, masterId ("fader"), "Master Fader", 0.0f);
 
+    // Bus mode: the stereo stream bus comes straight in and only the master chain is used.
+    addBool (layout, masterId ("busMode"), "Bus Mode", true);
+    juce::StringArray pairs;
+    for (int i = 1; i < maxInputs; i += 2)
+        pairs.add (juce::String (i) + "-" + juce::String (i + 1));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { masterId ("busSrc"), 1 },
+                                                              "Bus Input", pairs, 0));
+    addDb (layout, masterId ("busTrim"), "Bus Trim", -24.0f, 24.0f, 0.0f);
+
+    // Automatic leveler at the start of the master chain (both modes).
+    addBool (layout, masterId ("levOn"), "Leveler On", true);
+    addFloat (layout, masterId ("levTarget"), "Leveler Target", { -30.0f, -8.0f, 0.5f }, -16.0f,
+              [] (float v, int) { return juce::String (v, 1) + " LUFS"; });
+    addFloat (layout, masterId ("levRange"), "Leveler Range", { 0.0f, 18.0f, 0.5f }, 9.0f,
+              [] (float v, int) { return "+/-" + juce::String (v, 1) + " dB"; });
+    addFloat (layout, masterId ("levSpeed"), "Leveler Speed", { 0.5f, 20.0f, 0.1f, 0.5f }, 4.0f,
+              [] (float v, int) { return juce::String (v, 1) + " s"; });
+
     return layout;
 }
 } // namespace sr

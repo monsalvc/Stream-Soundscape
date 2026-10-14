@@ -10,6 +10,33 @@
 
 namespace sr
 {
+// ITU-R BS.1770 K-weighting (pre-filter shelf + RLB high-pass) for any sample rate,
+// using the same derivation as libebur128.
+inline void kWeighting (double fs, BiquadCoeffs& shelf, BiquadCoeffs& highPass)
+{
+    {
+        const double f0 = 1681.974450955533, G = 3.999843853973347, Q = 0.7071752369554196;
+        const double K = std::tan (juce::MathConstants<double>::pi * f0 / fs);
+        const double Vh = std::pow (10.0, G / 20.0), Vb = std::pow (Vh, 0.4996667741545416);
+        const double a0 = 1.0 + K / Q + K * K;
+        shelf.b0 = (float) ((Vh + Vb * K / Q + K * K) / a0);
+        shelf.b1 = (float) (2.0 * (K * K - Vh) / a0);
+        shelf.b2 = (float) ((Vh - Vb * K / Q + K * K) / a0);
+        shelf.a1 = (float) (2.0 * (K * K - 1.0) / a0);
+        shelf.a2 = (float) ((1.0 - K / Q + K * K) / a0);
+    }
+    {
+        const double f0 = 38.13547087602444, Q = 0.5003270373238773;
+        const double K = std::tan (juce::MathConstants<double>::pi * f0 / fs);
+        const double a0 = 1.0 + K / Q + K * K;
+        highPass.b0 = 1.0f;
+        highPass.b1 = -2.0f;
+        highPass.b2 = 1.0f;
+        highPass.a1 = (float) (2.0 * (K * K - 1.0) / a0);
+        highPass.a2 = (float) ((1.0 - K / Q + K * K) / a0);
+    }
+}
+
 class LoudnessMeter
 {
 public:
@@ -17,28 +44,7 @@ public:
 
     void prepare (double fs)
     {
-        // K-weighting coefficients for any sample rate (same derivation as libebur128).
-        {
-            const double f0 = 1681.974450955533, G = 3.999843853973347, Q = 0.7071752369554196;
-            const double K = std::tan (juce::MathConstants<double>::pi * f0 / fs);
-            const double Vh = std::pow (10.0, G / 20.0), Vb = std::pow (Vh, 0.4996667741545416);
-            const double a0 = 1.0 + K / Q + K * K;
-            shelf.b0 = (float) ((Vh + Vb * K / Q + K * K) / a0);
-            shelf.b1 = (float) (2.0 * (K * K - Vh) / a0);
-            shelf.b2 = (float) ((Vh - Vb * K / Q + K * K) / a0);
-            shelf.a1 = (float) (2.0 * (K * K - 1.0) / a0);
-            shelf.a2 = (float) ((1.0 - K / Q + K * K) / a0);
-        }
-        {
-            const double f0 = 38.13547087602444, Q = 0.5003270373238773;
-            const double K = std::tan (juce::MathConstants<double>::pi * f0 / fs);
-            const double a0 = 1.0 + K / Q + K * K;
-            highPass.b0 = 1.0f;
-            highPass.b1 = -2.0f;
-            highPass.b2 = 1.0f;
-            highPass.a1 = (float) (2.0 * (K * K - 1.0) / a0);
-            highPass.a2 = (float) ((1.0 - K / Q + K * K) / a0);
-        }
+        kWeighting (fs, shelf, highPass);
 
         blockLength = juce::jmax (1, (int) std::round (fs * 0.1));
         resetAll();

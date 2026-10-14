@@ -1,45 +1,54 @@
 # StreamRack
 
-A dedicated mixer for the livestream. It receives individual channels from the Behringer WING over
-Dante, gives each one its own EQ, dynamics and optional VST3/AU plugins, and sends a separate
-stereo stream mix to Wirecast. The house mix is never touched.
+A dedicated processor for the livestream mix. It takes audio from the Behringer WING over Dante,
+adds "color" (tone, glue, saturation, reverb, consistent loudness) with built-in processing and free
+VST3/AU plugins, and sends the finished stereo mix on to Wirecast. The house mix is never touched.
 
 ```
-WING ── WING-DANTE card ── network ── Mac in the multimedia room
-                                       │
-                         Dante Virtual Soundcard (64 inputs)
-                                       │
-                                  StreamRack
-          24 channel strips: input select → trim → HPF → gate → 4-band EQ
-                             → compressor → 2 plugin inserts → pan/fader
-          reverb bus → master: bus comp → 2 inserts → fader → limiter → loudness meter
-                                       │
-                 outputs 1-2 → BlackHole → Wirecast → YouTube
-                 outputs 3-4 → headphones (optional)
+WING ─ Dante ─► "Color" Mac: Dante Virtual Soundcard
+                  StreamRack
+                    Bus mode:      stream bus (2 ch) → trim
+                    Advanced mode: up to 24 channels → EQ/dynamics/inserts → mix (+ reverb bus)
+                    then:          leveler → bus comp → 4 inserts → fader → limiter
+                  Dante Virtual Soundcard outputs 1-2
+             ─ Dante ─► Wirecast Mac (unchanged) ─► YouTube
 ```
+
+## Two modes
+
+Switch with the **Bus | Advanced** buttons at the top left. The mode is saved with each scene.
+
+- **Bus mode (default):** the console's stereo stream bus comes in on one Dante pair and goes through
+  the master chain. Balance stays on the console; StreamRack adds the color and keeps the level steady.
+  The screen shows the incoming level, what the leveler is doing, and the signal flow.
+- **Advanced mode:** individual channels come in over Dante and StreamRack mixes them itself, with full
+  processing per channel (see below). Use it when you want a different balance or stream-only
+  processing for each source.
 
 ## What it does
 
-- **24 channel strips** fed from any of 64 Dante inputs, mono or stereo (stereo uses the selected
-  input and the next one).
-- **Built-in processing on every channel:** trim, 24 dB/oct high-pass, gate, 4-band EQ
-  (shelves plus two parametric mids), compressor and a post-fader send to a shared reverb.
-- **Two VST3/AU insert slots per channel, two on the master, and one on the reverb bus.** Plugin latency is compensated
-  between channels so inserts don't cause phasing.
-- **Master bus:** glue compressor, fader and a look-ahead brickwall limiter (default ceiling -1 dBFS).
+- **Automatic leveler** (both modes): slowly turns the stream up or down toward a loudness target
+  (default -16 LUFS, within +/-9 dB) so the stream stays even from worship to sermon to announcements,
+  and when FOH rides a post-fader bus. It holds its gain through pauses instead of pumping up room noise.
+- **Master chain:** leveler, glue compressor, **four VST3/AU insert slots in order**, master fader and a
+  look-ahead brickwall limiter (default ceiling -1 dBFS).
 - **Loudness meter** (ITU-R BS.1770 / EBU R128): momentary, short-term and integrated loudness
   against the -14 LUFS YouTube target. Green means on target, amber means quiet, red means hot.
-- **Scenes:** save and recall full snapshots (names, settings and plugins), for example
+- **Advanced mode channels:** 24 strips fed from any of 64 Dante inputs, mono or stereo, each with
+  trim, 24 dB/oct high-pass, gate, 4-band EQ, compressor, two plugin inserts, pan, fader and a send to a
+  shared reverb bus (built-in reverb, or a plugin in the reverb bus slot). Plugin latency is compensated
+  between channels so inserts don't cause phasing.
+- **Scenes:** save and recall full snapshots (mode, names, settings and plugins), for example
   "Sabbath Worship" or "Sabbath School". They are stored in `~/Documents/StreamRack Scenes`.
-- **Lock mode for volunteers:** a PIN-protected view that shows only channel names, faders, mutes,
-  meters, loudness and scene recall. Lock mode survives a restart.
+- **Lock mode for volunteers:** a PIN-protected view that shows only meters, loudness, faders, mutes
+  and scene recall. Lock mode survives a restart.
 - Everything autosaves every 30 seconds and on quit, and comes back on the next launch.
 
 ## Recommended free plugins
 
-StreamRack's built-in EQ, gate, compressor, reverb and limiter cover the basics. These free, well-regarded
-plugins add the "color". All of them have native Apple Silicon builds in VST3 and AU. Download them from
-the developers' own sites only.
+StreamRack's built-in EQ, gate, compressor, reverb, leveler and limiter cover the basics. These free,
+well-regarded plugins add the "color". They are available for macOS as VST3/AU; check each developer's
+site for the current Apple Silicon build before installing, and download only from the developers' own sites.
 
 | Plugin | Use it for | Where it goes |
 |---|---|---|
@@ -50,6 +59,11 @@ the developers' own sites only.
 | [Bertom Denoiser Classic](https://www.kvraudio.com/product/denoiser-classic-by-bertom-audio) | Zero-latency hiss and room-noise reduction | Lavalier, podium and room mics |
 | [Valhalla Supermassive](https://valhalladsp.com) | Lush reverbs and delays | The reverb bus slot (set **Mix to 100%**) |
 | [Kilohearts Essentials](https://kilohearts.com) | Saturation, transient shaper, stereo width, clipper | Wherever needed |
+| [Softube Saturation Knob](https://www.softube.com/saturationknob) | One-knob warmth/grit (needs a free Softube + iLok account) | Master insert, vocals |
+| [Klanghelm IVGI](https://klanghelm.com) | Subtle analog-style saturation and crosstalk ("glue") | Master insert |
+| [Voxengo Tube Amp](https://www.voxengo.com) | Tube-style drive (closest free relative of Magma BB Tubes) | Master insert, vocals |
+| [Analog Obsession TUBA](https://www.patreon.com/analogobsession) | Tube harmonics, adjustable low/high balance | Master insert, vocals |
+| [Slate Digital Fresh Air](https://slatedigital.com) | High-frequency exciter for "air" and clarity (needs a free iLok account) | Master insert, vocals |
 
 ### Starting points
 
@@ -57,8 +71,10 @@ the developers' own sites only.
   cut around 200-300 Hz and a de-ess band at 6-8 kHz → built-in compressor 3:1. No reverb.
 - **Lead vocal:** HPF 100 Hz → Nova de-ess → ATONE or DC1A for character → a little reverb send.
 - **Band:** keep it light: HPF, a broad EQ move, and reverb on keys/pads. Let the master bus glue it.
-- **Master:** Kotelnikov at about 2:1 and 1-2 dB of gain reduction → built-in limiter at -1 dB.
-  Ride the master fader so short-term loudness sits around -14 LUFS.
+- **Master / Bus mode:** leveler on → insert 1 Nova (tame mud around 250 Hz and harshness around
+  3 kHz) → insert 2 a saturator (Saturation Knob, IVGI or Tube Amp, kept subtle) → insert 3 Fresh Air
+  (a touch of air) → insert 4 Kotelnikov at about 2:1 with 1-2 dB of gain reduction → built-in limiter
+  at -1 dB. Aim for a short-term loudness around -14 LUFS.
 
 Use the **reverb bus slot** (in the master panel's REVERB BUS section) rather than a channel insert for
 reverb, so all channels share one reverb. When a plugin is loaded there it replaces the built-in reverb;
@@ -68,39 +84,49 @@ set the plugin to 100% wet, and the channels' Reverb knobs control how much each
 
 ### 1. WING → Dante
 
-1. Install the **WING-DANTE** expansion card in the WING.
-2. In the WING routing, send each channel you want on the stream to a Dante output on the card.
-   Use a **tap point before the fader** (post-EQ/dynamics if available) so FOH fader moves don't
-   change the stream balance. Check which tap points your firmware offers for card outputs.
+1. The **WING-DANTE** card sends the stream bus (Bus mode) or individual channels (Advanced mode).
+2. For Advanced mode, send each channel to a Dante output using a **tap point before the fader**
+   (post-EQ/dynamics if available) so FOH fader moves don't change the stream balance. For Bus mode,
+   ask whoever runs the bus whether its sends can be **pre-fader** for the same reason.
 3. Leave the WING card as the Dante clock leader at **48 kHz**.
 
-### 2. The Mac
+### 2. The "color" Mac (runs StreamRack)
 
-1. Install **Dante Virtual Soundcard** (Audinate licence) and **Dante Controller**. Set DVS to
-   48 kHz and route the WING card's channels to DVS receive channels in Dante Controller.
-2. Install **BlackHole 2ch** (free virtual audio cable) for the feed into Wirecast.
-3. Open **Audio MIDI Setup → + → Create Aggregate Device** and tick:
-   - Dante Virtual Soundcard, set as the **Clock Source**
-   - BlackHole 2ch, with **Drift Correction** on
-   - (optional) your headphone output, with Drift Correction on
+1. Install **Dante Virtual Soundcard** (each Mac needs its own licence) and **Dante Controller**.
+   Set DVS to 48 kHz.
+2. In StreamRack click **Audio...** and choose **Dante Virtual Soundcard** for both input and output,
+   at 48 kHz. Using one device for both keeps everything on the Dante clock. A buffer of 256 samples
+   is plenty; latency doesn't matter for a stream.
+3. In **Dante Controller**:
+   - WING card → this Mac's DVS receive channels (the bus pair, or the individual channels).
+   - This Mac's DVS transmit channels **1-2** → the Wirecast Mac's DVS receive channels that Wirecast
+     already uses. StreamRack sends the finished mix to every output pair, so 1-2 is all you need.
+4. In Bus mode, pick the Dante pair the bus arrives on in **STREAM BUS IN** and check the meters move.
 
-   StreamRack sends the stream mix to every output pair, so BlackHole and the headphones both
-   get it.
-4. In StreamRack click **Audio...** and choose the aggregate device for input and output,
-   at 48 kHz. A buffer of 256 samples is plenty; latency doesn't matter for a stream.
-5. In **Wirecast** set the audio source to **BlackHole 2ch**. Use Wirecast's audio delay to line
-   the audio up with the video (the video is usually the one that is late).
+### 3. The Wirecast Mac
 
-### 3. Plugins (optional)
+Nothing changes: it keeps receiving over Dante. After the first test, use Wirecast's audio delay to
+line the audio up with the video (the extra hop adds a few milliseconds).
+
+**Backup:** the color Mac is now in the audio path. Also route the WING's raw bus straight to two
+spare DVS inputs on the Wirecast Mac and set up a second Wirecast audio source for it, so a volunteer
+can switch to it in seconds if the color Mac ever freezes.
+
+**Running StreamRack on the Wirecast Mac instead** (one computer): install **BlackHole 2ch**, create an
+**Aggregate Device** in Audio MIDI Setup with DVS as the clock source and BlackHole (plus headphones,
+if wanted) with drift correction on, choose it in StreamRack's **Audio...**, and set Wirecast's audio
+source to BlackHole.
+
+### 4. Plugins (optional)
 
 Click **Plugins... → Options... → Scan for new or updated VST3 plug-ins** (and AudioUnit). Scanning
 runs inside the app; if a plugin crashes the scan, relaunch and scan again and that plugin will be
 skipped. Then click any **+ insert** button to load one.
 
-### 4. Lock it for Sabbath
+### 5. Lock it for Sabbath
 
-Name the channels (double-click a name), set the mix, save a scene, then click **Lock** and choose
-a PIN. Volunteers get the simple view. **Unlock** asks for the PIN.
+Set things up, save a scene, then click **Lock** and choose a PIN. Volunteers get the simple view
+(meters, loudness, faders and scene recall). **Unlock** asks for the PIN.
 
 ## Building from source
 
@@ -128,10 +154,11 @@ To use an existing JUCE checkout instead of downloading it, pass `-DSTREAMRACK_J
 | `Source/Engine/ChannelStrip.*` | One channel's processing chain |
 | `Source/Engine/Dsp.h` | EQ filters, compressor, gate, limiter, delay compensation |
 | `Source/Engine/LoudnessMeter.h` | BS.1770 loudness measurement |
+| `Source/Engine/Leveler.h` | Automatic leveler |
 | `Source/Engine/PluginSlot.*`, `PluginHost.*` | VST3/AU hosting |
 | `Source/Engine/Params.*` | Every parameter, its range and its default |
-| `Source/UI/*` | Main window, strips, channel editor, master panel, plugin windows |
-| `Tests/EngineTests.cpp` | Headless tests: loudness against EBU reference signals, limiter ceiling, EQ, compressor, routing, state |
+| `Source/UI/*` | Main window, Bus mode screen, strips, channel editor, master panel, plugin windows |
+| `Tests/EngineTests.cpp` | Headless tests: loudness against EBU reference signals, limiter ceiling, EQ, compressor, leveler, Bus mode and channel routing, state |
 
 ## Licensing
 

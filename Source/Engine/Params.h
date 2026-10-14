@@ -7,7 +7,7 @@ namespace sr
 constexpr int numStrips = 24;
 constexpr int maxInputs = 64;
 constexpr int slotsPerStrip = 2;
-constexpr int numMasterSlots = 2;
+constexpr int numMasterSlots = 4;
 
 // Faders and sends at or below this level are treated as fully off.
 constexpr float offDb = -60.0f;
