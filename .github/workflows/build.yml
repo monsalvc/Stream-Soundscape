@@ -12,7 +12,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        # Apple Silicon only, without LTO, to keep CI fast (~10-15 min instead of ~1 h).
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DSTREAMRACK_LTO=OFF
 
       - name: Build
         run: cmake --build build --config Release --parallel

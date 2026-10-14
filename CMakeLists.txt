@@ -59,7 +59,13 @@ target_sources(StreamRack PRIVATE
 target_include_directories(StreamRack PRIVATE Source)
 target_compile_definitions(StreamRack PRIVATE ${COMMON_DEFINITIONS} JUCE_APPLICATION_NAME_STRING="StreamRack" JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}")
 target_link_libraries(StreamRack PRIVATE ${COMMON_MODULES}
-    juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
+    juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+
+# Link-time optimisation makes the app slightly faster but the build much slower; CI turns it off.
+option(STREAMRACK_LTO "Build the app with link-time optimisation" ON)
+if(STREAMRACK_LTO)
+    target_link_libraries(StreamRack PRIVATE juce::juce_recommended_lto_flags)
+endif()
 
 # ---- Tests ----
 juce_add_console_app(StreamRackTests PRODUCT_NAME "StreamRackTests")

@@ -113,7 +113,9 @@ cmake --build build --config Release --parallel
 open build/StreamRack_artefacts/Release/StreamRack.app
 ```
 
-Every push also builds a universal macOS app in GitHub Actions (**Actions → Build → Artifacts**).
+Every push also builds an Apple Silicon macOS app in GitHub Actions (**Actions → Build → Artifacts**).
+CI skips link-time optimisation to keep builds quick; local builds use it by default
+(`-DSTREAMRACK_LTO=OFF` turns it off, `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` makes an Intel + Apple Silicon build).
 The app isn't code-signed, so the first time you open it, right-click it and choose **Open**.
 
 To use an existing JUCE checkout instead of downloading it, pass `-DSTREAMRACK_JUCE_DIR=/path/to/JUCE`.
