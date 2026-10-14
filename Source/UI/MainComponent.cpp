@@ -57,6 +57,12 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
     detailViewport.setViewedComponent (&detail, false);
     detailViewport.setScrollBarsShown (false, true);
     addChildComponent (detailViewport);
+    detail.setCurveShown (settings.getBoolValue ("eqCurve", false));
+    detail.onLayoutChanged = [this]
+    {
+        settings.setValue ("eqCurve", detail.isCurveShown());
+        resized();
+    };
 
     addChildComponent (busPanel);
     addAndMakeVisible (master);
@@ -129,8 +135,8 @@ void MainComponent::resized()
     detailViewport.setVisible (showDetail);
     if (showDetail)
     {
-        detailViewport.setBounds (r.removeFromBottom (DetailPanel::preferredHeight + 8));
-        detail.setSize (juce::jmax (detailViewport.getWidth(), detail.getPreferredWidth()), DetailPanel::preferredHeight);
+        detailViewport.setBounds (r.removeFromBottom (detail.getPreferredHeight() + 8));
+        detail.setSize (juce::jmax (detailViewport.getWidth(), detail.getPreferredWidth()), detail.getPreferredHeight());
     }
 
     stripViewport.setBounds (r);

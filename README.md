@@ -38,6 +38,9 @@ Switch with the **Bus | Advanced** buttons at the top left. The mode is saved wi
   trim, 24 dB/oct high-pass, gate, 4-band EQ, compressor, two plugin inserts, pan, fader and a send to a
   shared reverb bus (built-in reverb, or a plugin in the reverb bus slot). Plugin latency is compensated
   between channels so inserts don't cause phasing.
+- **EQ curve view:** press **CURVE** in a channel's EQ section to swap the knobs for a frequency-response
+  graph of its high-pass and EQ. Drag a point to set frequency and gain, scroll over a mid band to change
+  its Q, double-click a point to reset its gain. The choice is remembered.
 - **Scenes:** save and recall full snapshots (mode, names, settings and plugins), for example
   "Sabbath Worship" or "Sabbath School". They are stored in `~/Documents/StreamRack Scenes`.
 - **Lock mode for volunteers:** a PIN-protected view that shows only meters, loudness, faders, mutes
@@ -157,7 +160,7 @@ To use an existing JUCE checkout instead of downloading it, pass `-DSTREAMRACK_J
 | `Source/Engine/Leveler.h` | Automatic leveler |
 | `Source/Engine/PluginSlot.*`, `PluginHost.*` | VST3/AU hosting |
 | `Source/Engine/Params.*` | Every parameter, its range and its default |
-| `Source/UI/*` | Main window, Bus mode screen, strips, channel editor, master panel, plugin windows |
+| `Source/UI/*` | Main window, Bus mode screen, strips, channel editor and EQ curve, master panel, plugin windows |
 | `Tests/EngineTests.cpp` | Headless tests: loudness against EBU reference signals, limiter ceiling, EQ, compressor, leveler, Bus mode and channel routing, state |
 
 ## Licensing
@@ -170,6 +173,6 @@ VST is a trademark of Steinberg Media Technologies GmbH.
 
 - True-peak (oversampled) limiting and metering
 - Out-of-process plugin scanning so a bad plugin can't crash a scan
-- EQ curve display and per-channel presets ("Pastor lav", "Acoustic guitar")
+- Per-channel presets ("Pastor lav", "Acoustic guitar")
 - Solo/PFL to the headphone output
 - Remote control from a tablet (OSC or a small web page)

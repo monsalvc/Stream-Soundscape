@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EqCurve.h"
 #include "PluginUi.h"
 #include "Widgets.h"
 
@@ -9,7 +10,13 @@ namespace sr::ui
 class DetailPanel : public juce::Component
 {
 public:
-    static constexpr int preferredHeight = 140;
+    int getPreferredHeight() const { return showCurve ? 260 : 140; }
+
+    // Called when the panel needs a different height (the EQ curve was shown or hidden).
+    std::function<void()> onLayoutChanged;
+
+    bool isCurveShown() const noexcept { return showCurve; }
+    void setCurveShown (bool);
 
     DetailPanel (RackProcessor&, PluginWindows&);
 
@@ -42,6 +49,9 @@ private:
         compMakeup { "Makeup" };
     Knob send { "Reverb" };
     Toggle hpfOn { "HPF" }, gateOn { "GATE" }, eqOn { "EQ" }, compOn { "COMP" };
+    juce::TextButton curveButton { "CURVE" };
+    EqCurve curve;
+    bool showCurve = false;
     SlotButton slot1, slot2;
     juce::Rectangle<int> grArea;
     std::vector<Section> sections;

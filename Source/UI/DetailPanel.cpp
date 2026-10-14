@@ -11,7 +11,7 @@ namespace
 } // namespace
 
 DetailPanel::DetailPanel (RackProcessor& r, PluginWindows& windows)
-    : rack (r), slot1 (r, windows), slot2 (r, windows)
+    : rack (r), curve (r), slot1 (r, windows), slot2 (r, windows)
 {
     title.setFont (juce::FontOptions (15.0f, juce::Font::bold));
     title.setJustificationType (juce::Justification::centredLeft);
@@ -30,6 +30,25 @@ DetailPanel::DetailPanel (RackProcessor& r, PluginWindows& windows)
         for (auto* c : s.items)
             addAndMakeVisible (c);
     addAndMakeVisible (slot2);
+
+    curveButton.setClickingTogglesState (true);
+    curveButton.setTooltip ("Show the EQ as a graph you can drag");
+    curveButton.onClick = [this] { setCurveShown (curveButton.getToggleState()); };
+    addAndMakeVisible (curveButton);
+    addChildComponent (curve);
+}
+
+void DetailPanel::setCurveShown (bool shouldShow)
+{
+    showCurve = shouldShow;
+    curveButton.setToggleState (showCurve, juce::dontSendNotification);
+    curve.setVisible (showCurve);
+    for (auto* k : std::initializer_list<juce::Component*> { &lowGain, &lowFreq, &m1Gain, &m1Freq, &m1Q, &m2Gain,
+                                                             &m2Freq, &m2Q, &highGain, &highFreq })
+        k->setVisible (! showCurve);
+    resized();
+    if (onLayoutChanged)
+        onLayoutChanged();
 }
 
 void DetailPanel::setStrip (int index)
@@ -65,6 +84,7 @@ void DetailPanel::setStrip (int index)
     compMakeup.attach (state, id ("compMakeup"));
     send.attach (state, id ("send"));
 
+    curve.setStrip (strip);
     slot1.setSlot (&rack.getStrip (strip).getSlot (0));
     slot2.setSlot (&rack.getStrip (strip).getSlot (1));
     refresh();
@@ -83,6 +103,7 @@ void DetailPanel::tick()
 {
     if (strip < 0)
         return;
+    curve.tick();
     const float gr = rack.getStrip (strip).compReductionDb.load();
     if (std::abs (gr - compReduction) > 0.2f)
     {
@@ -139,8 +160,25 @@ void DetailPanel::resized()
         r.removeFromLeft (gap);
 
         auto inner = s.area.reduced (gap, 0).withTrimmedTop (20).withTrimmedBottom (4);
+
+        if (&s == &sections[2])
+        {
+            // EQ: on/off and CURVE stacked in the first column, then knobs or the curve.
+            auto column = inner.removeFromLeft (toggleWidth).withHeight (100);
+            eqOn.setBounds (column.withSizeKeepingCentre (toggleWidth - 6, 26).translated (0, -16));
+            curveButton.setBounds (column.withSizeKeepingCentre (toggleWidth - 6, 22).translated (0, 16));
+            if (showCurve)
+            {
+                curve.setBounds (inner.reduced (2, 0));
+                continue;
+            }
+        }
+
+        inner = inner.withHeight (juce::jmin (inner.getHeight(), 104));
         for (auto* c : s.items)
         {
+            if (c == &eqOn)
+                continue;
             if (dynamic_cast<Toggle*> (c) != nullptr)
                 c->setBounds (inner.removeFromLeft (toggleWidth).withSizeKeepingCentre (toggleWidth - 6, 26));
             else if (c == &slot1)
@@ -157,6 +195,6 @@ void DetailPanel::resized()
 
     // Gain reduction meter sits at the right edge of the compressor section.
     const auto& comp = sections[3].area;
-    grArea = juce::Rectangle<int> (comp.getRight() - gap - 6, comp.getY() + 22, 6, comp.getHeight() - 30);
+    grArea = juce::Rectangle<int> (comp.getRight() - gap - 6, comp.getY() + 22, 6, juce::jmin (comp.getHeight() - 30, 94));
 }
 } // namespace sr::ui
