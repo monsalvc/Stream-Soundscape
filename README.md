@@ -120,6 +120,15 @@ can switch to it in seconds if the color Mac ever freezes.
 if wanted) with drift correction on, choose it in StreamRack's **Audio...**, and set Wirecast's audio
 source to BlackHole.
 
+### Using Waves SoundGrid instead of Dante
+
+StreamRack doesn't care which network carries the audio: it uses whatever Mac audio device you pick.
+With the **Waves SoundGrid Driver** installed, choose the SoundGrid device in **Audio...** (for input
+and output) and patch channels in SoundGrid Studio the same way you would in Dante Controller. Waves
+plugins installed through Waves Central load in StreamRack's inserts like any AU/VST3 plugin; they
+run on the Mac's processor, not on a SoundGrid DSP server. (This path is covered by simulated-device
+tests but has not been tried on real SoundGrid hardware yet.)
+
 ### 4. Plugins (optional)
 
 Click **Plugins... → Options... → Scan for new or updated VST3 plug-ins** (and AudioUnit). Scanning
@@ -161,7 +170,7 @@ To use an existing JUCE checkout instead of downloading it, pass `-DSTREAMRACK_J
 | `Source/Engine/PluginSlot.*`, `PluginHost.*` | VST3/AU hosting |
 | `Source/Engine/Params.*` | Every parameter, its range and its default |
 | `Source/UI/*` | Main window, Bus mode screen, strips, channel editor and EQ curve, master panel, plugin windows |
-| `Tests/EngineTests.cpp` | Headless tests: loudness against EBU reference signals, limiter ceiling, EQ, compressor, leveler, Bus mode and channel routing, state |
+| `Tests/EngineTests.cpp` | Headless tests: loudness against EBU reference signals, limiter ceiling, EQ, compressor, leveler, Bus mode and channel routing, state, and the full device path with simulated Dante/SoundGrid-style devices (channel counts, 44.1-96 kHz, 32-1024 sample buffers) |
 
 ## Licensing
 

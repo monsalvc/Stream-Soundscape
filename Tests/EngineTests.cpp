@@ -4,6 +4,7 @@
 #include "Engine/LoudnessMeter.h"
 #include "Engine/Leveler.h"
 #include "Engine/RackProcessor.h"
+#include <juce_audio_utils/juce_audio_utils.h>
 #include <cstdio>
 
 namespace
@@ -283,6 +284,164 @@ void testBusMode()
     }
     check (maxErr < 1e-4f, "bus mode: inputs 3-4 pass to outputs 1-2 unchanged", maxErr);
 }
+//==============================================================================
+// Network audio devices (Dante Virtual Soundcard, Waves SoundGrid Driver) reach the app as an
+// ordinary multichannel audio device. This fake device lets the tests drive the real
+// device -> AudioProcessorPlayer -> RackProcessor path with different channel counts,
+// sample rates and buffer sizes, the way a driver would.
+class FakeNetworkDevice : public juce::AudioIODevice
+{
+public:
+    FakeNetworkDevice (int ins, int outs, double rate, int block)
+        : AudioIODevice ("Fake network device", "Test"), numIns (ins), numOuts (outs), sampleRate (rate), blockSize (block)
+    {
+    }
+
+    juce::StringArray getOutputChannelNames() override { return names (numOuts); }
+    juce::StringArray getInputChannelNames() override { return names (numIns); }
+    juce::Array<double> getAvailableSampleRates() override { return { sampleRate }; }
+    juce::Array<int> getAvailableBufferSizes() override { return { blockSize }; }
+    int getDefaultBufferSize() override { return blockSize; }
+    juce::String open (const juce::BigInteger&, const juce::BigInteger&, double, int) override { return {}; }
+    void close() override {}
+    bool isOpen() override { return true; }
+    void start (juce::AudioIODeviceCallback*) override {}
+    void stop() override {}
+    bool isPlaying() override { return true; }
+    juce::String getLastError() override { return {}; }
+    int getCurrentBufferSizeSamples() override { return blockSize; }
+    double getCurrentSampleRate() override { return sampleRate; }
+    int getCurrentBitDepth() override { return 32; }
+    juce::BigInteger getActiveOutputChannels() const override { return bits (numOuts); }
+    juce::BigInteger getActiveInputChannels() const override { return bits (numIns); }
+    int getOutputLatencyInSamples() override { return 0; }
+    int getInputLatencyInSamples() override { return 0; }
+
+private:
+    static juce::StringArray names (int n)
+    {
+        juce::StringArray a;
+        for (int i = 0; i < n; ++i)
+            a.add ("Ch " + juce::String (i + 1));
+        return a;
+    }
+
+    static juce::BigInteger bits (int n)
+    {
+        juce::BigInteger b;
+        b.setRange (0, n, true);
+        return b;
+    }
+
+    int numIns, numOuts;
+    double sampleRate;
+    int blockSize;
+};
+
+struct DeviceCase
+{
+    const char* name;
+    int ins, outs;
+    double rate;
+    int block;
+};
+
+void testNetworkDevices()
+{
+    const DeviceCase cases[] = {
+        { "64x64 @ 48 kHz, 128 samples (typical Dante VSC)", 64, 64, 48000.0, 128 },
+        { "64x64 @ 48 kHz, 32 samples (low-latency)", 64, 64, 48000.0, 32 },
+        { "32x32 @ 96 kHz, 64 samples (SoundGrid at 96k)", 32, 32, 96000.0, 64 },
+        { "16x16 @ 44.1 kHz, 512 samples", 16, 16, 44100.0, 512 },
+        { "8x8 @ 48 kHz, 1024 samples (large buffer)", 8, 8, 48000.0, 1024 },
+        { "4x2 @ 48 kHz, 480 samples (odd buffer, stereo out)", 4, 2, 48000.0, 480 },
+    };
+
+    for (const auto& c : cases)
+    {
+        sr::PluginHost host (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("streamrack-test"));
+        sr::RackProcessor rack (host);
+        juce::AudioProcessorPlayer player;
+        player.setProcessor (&rack);
+
+        // Bus mode, bus on Dante/SoundGrid inputs 3-4, leveler and limiter on (defaults).
+        setParam (rack, sr::masterId ("busSrc"), 1.0f);
+
+        FakeNetworkDevice device (c.ins, c.outs, c.rate, c.block);
+        player.audioDeviceAboutToStart (&device);
+
+        std::vector<std::vector<float>> in ((size_t) c.ins, std::vector<float> ((size_t) c.block)),
+            out ((size_t) c.outs, std::vector<float> ((size_t) c.block));
+        std::vector<const float*> inPtrs;
+        std::vector<float*> outPtrs;
+        for (auto& v : in)
+            inPtrs.push_back (v.data());
+        for (auto& v : out)
+            outPtrs.push_back (v.data());
+
+        // 20 s of a stereo 1 kHz sine at -23 dBFS (= -23 LUFS) on inputs 3-4, noise on inputs 1-2.
+        juce::Random rng (7);
+        const float amp = juce::Decibels::decibelsToGain (-23.0f);
+        double phase = 0;
+        float maxOut = 0, pairDiff = 0;
+        bool finite = true;
+        const int blocks = (int) (20.0 * c.rate / c.block);
+        for (int b = 0; b < blocks; ++b)
+        {
+            for (int i = 0; i < c.block; ++i)
+            {
+                const float v = amp * (float) std::sin (phase);
+                phase += juce::MathConstants<double>::twoPi * 1000.0 / c.rate;
+                in[0][(size_t) i] = in[1][(size_t) i] = 0.5f * (rng.nextFloat() - 0.5f);
+                in[2][(size_t) i] = in[3][(size_t) i] = v;
+            }
+
+            juce::AudioIODeviceCallbackContext context;
+            player.audioDeviceIOCallbackWithContext (inPtrs.data(), c.ins, outPtrs.data(), c.outs, c.block, context);
+
+            for (int ch = 0; ch < c.outs; ++ch)
+                for (int i = 0; i < c.block; ++i)
+                {
+                    finite = finite && std::isfinite (out[(size_t) ch][(size_t) i]);
+                    maxOut = juce::jmax (maxOut, std::abs (out[(size_t) ch][(size_t) i]));
+                    // Every output pair carries the same stream mix.
+                    pairDiff = juce::jmax (pairDiff, std::abs (out[(size_t) ch][(size_t) i] - out[(size_t) (ch % 2)][(size_t) i]));
+                }
+        }
+        player.audioDeviceStopped();
+        player.setProcessor (nullptr);
+
+        // The leveler should have taken the -23 LUFS bus up toward its -16 LUFS target (+7 dB, within range).
+        const float shortTerm = rack.loudness.shortTerm.load();
+        const bool ok = finite && maxOut <= juce::Decibels::decibelsToGain (-1.0f) + 1e-5f && pairDiff < 1e-6f
+                        && std::abs (shortTerm + 16.0f) < 0.6f;
+        check (ok, (juce::String ("device: ") + c.name + "  -> LUFS").toRawUTF8(), shortTerm);
+    }
+
+    // A bus pair the device doesn't have (e.g. 5-6 on a 4-input device) gives silence, not a crash.
+    {
+        sr::PluginHost host (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("streamrack-test"));
+        sr::RackProcessor rack (host);
+        juce::AudioProcessorPlayer player;
+        player.setProcessor (&rack);
+        setParam (rack, sr::masterId ("busSrc"), 2.0f);
+        FakeNetworkDevice device (4, 2, 48000.0, 256);
+        player.audioDeviceAboutToStart (&device);
+        std::vector<float> a (256, 0.5f), l (256), r (256);
+        const float* ins[] = { a.data(), a.data(), a.data(), a.data() };
+        float* outs[] = { l.data(), r.data() };
+        juce::AudioIODeviceCallbackContext context;
+        float maxOut = 0;
+        for (int b = 0; b < 100; ++b)
+        {
+            player.audioDeviceIOCallbackWithContext (ins, 4, outs, 2, 256, context);
+            maxOut = juce::jmax (maxOut, juce::FloatVectorOperations::findMaximum (l.data(), 256));
+        }
+        player.audioDeviceStopped();
+        player.setProcessor (nullptr);
+        check (maxOut < 1e-6f, "device: bus pair beyond the device's inputs is silent", maxOut);
+    }
+}
 } // namespace
 
 int main()
@@ -295,6 +454,7 @@ int main()
     testLeveler();
     testEngine();
     testBusMode();
+    testNetworkDevices();
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
 }
