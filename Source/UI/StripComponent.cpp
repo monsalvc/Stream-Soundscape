@@ -119,6 +119,10 @@ void StripComponent::resized()
     name.setBounds (r.removeFromTop (22));
     r.removeFromTop (4);
 
+    // Short windows: drop the pan knob so the fader keeps as much height as possible.
+    const bool compact = getHeight() < 330;
+    pan.setVisible (! locked && ! compact);
+
     if (! locked)
     {
         input.setBounds (r.removeFromTop (22));
@@ -130,7 +134,8 @@ void StripComponent::resized()
         r.removeFromTop (6);
         grArea = r.removeFromTop (6);
         r.removeFromTop (4);
-        pan.setBounds (r.removeFromTop (40));
+        if (! compact)
+            pan.setBounds (r.removeFromTop (40));
     }
     else
     {

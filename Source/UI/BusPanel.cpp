@@ -21,7 +21,6 @@ void BusPanel::setLocked (bool shouldLock)
 {
     locked = shouldLock;
     input.setEnabled (! locked);
-    trim.setVisible (! locked);
     resized();
     repaint();
 }
@@ -45,14 +44,17 @@ void BusPanel::paint (juce::Graphics& g)
     g.fillAll (colours::background);
     drawSection (g, inputArea, "STREAM BUS IN");
     drawSection (g, levelerArea, "AUTO LEVELER");
-    drawSection (g, flowArea, "SIGNAL FLOW");
+    if (! flowArea.isEmpty())
+        drawSection (g, flowArea, "SIGNAL FLOW");
 
     // Input level readout.
     {
         auto a = inputLabelArea;
+        const bool roomy = a.getHeight() >= 68;
         g.setColour (colours::dim);
         g.setFont (juce::FontOptions (12.0f));
-        g.drawText ("Peak", a.removeFromTop (18), juce::Justification::centredLeft);
+        if (roomy)
+            g.drawText ("Peak", a.removeFromTop (18), juce::Justification::centredLeft);
         const bool hot = inPeakDb > -3.0f, silent = inPeakDb < -60.0f;
         g.setColour (hot ? colours::red : (silent ? colours::dim : colours::text));
         g.setFont (juce::FontOptions (28.0f, juce::Font::bold));
@@ -60,8 +62,8 @@ void BusPanel::paint (juce::Graphics& g)
                     juce::Justification::centredLeft);
         g.setColour (colours::dim);
         g.setFont (juce::FontOptions (12.0f));
-        g.drawText (silent ? "No signal: check Dante routing" : (hot ? "Very hot: lower the trim" : "dBFS"),
-                    a.removeFromTop (18), juce::Justification::centredLeft);
+        g.drawFittedText (silent ? "No signal: check Dante routing" : (hot ? "Very hot: lower the trim" : "dBFS peak"),
+                          a.removeFromTop (18), juce::Justification::centredLeft, 1);
     }
 
     // Leveler: big readout plus a bar from the centre (right = boosting, left = cutting).
@@ -76,11 +78,12 @@ void BusPanel::paint (juce::Graphics& g)
                     a.removeFromTop (38), juce::Justification::centredLeft);
         g.setFont (juce::FontOptions (12.0f));
         g.setColour (colours::dim);
-        g.drawText (! on ? "Turn it on in the LEVELER section on the right"
-                         : (levelerGain > 0.5f ? "Turning the stream up (the bus is quiet)"
-                                               : (levelerGain < -0.5f ? "Turning the stream down (the bus is loud)"
-                                                                      : "On target")),
-                    a.removeFromTop (18), juce::Justification::centredLeft);
+        if (levelerArea.getHeight() >= 130)
+            g.drawFittedText (! on ? "Turn it on in the LEVELER section"
+                             : (levelerGain > 0.5f ? "Turning the stream up (the bus is quiet)"
+                                                   : (levelerGain < -0.5f ? "Turning the stream down (the bus is loud)"
+                                                                          : "On target")),
+                        a.removeFromTop (18), juce::Justification::centredLeft, 1);
 
         auto bar = a.removeFromTop (22).withTrimmedTop (6).toFloat();
         g.setColour (colours::panel);
@@ -101,6 +104,7 @@ void BusPanel::paint (juce::Graphics& g)
     }
 
     // Signal flow chips.
+    if (! flowArea.isEmpty())
     {
         const juce::StringArray steps { "Dante in", "Trim", "Leveler", "Bus Comp", "Inserts", "Fader", "Limiter",
                                         "Dante out" };
@@ -133,28 +137,52 @@ void BusPanel::paint (juce::Graphics& g)
 
 void BusPanel::resized()
 {
-    auto r = getLocalBounds().reduced (24);
+    // Tall: input, leveler and signal flow stacked. Shorter: no signal-flow row.
+    // Very short: input and leveler side by side.
+    const bool tight = getHeight() < 420;
+    auto r = getLocalBounds().reduced (tight ? 10 : 24);
     card = r.withSizeKeepingCentre (juce::jmin (r.getWidth(), 820), juce::jmin (r.getHeight(), 520));
     auto c = card;
+    constexpr int gap = 12;
 
-    inputArea = c.removeFromTop (200);
-    c.removeFromTop (12);
-    levelerArea = c.removeFromTop (150);
-    c.removeFromTop (12);
-    flowArea = c.removeFromTop (70);
+    flowArea = {};
+    if (c.getHeight() >= 400)
+    {
+        flowArea = c.removeFromBottom (70);
+        c.removeFromBottom (gap);
+    }
 
-    auto a = inputArea.reduced (16, 0).withTrimmedTop (26).withTrimmedBottom (12);
+    if (c.getHeight() < 260 && c.getWidth() >= 480)
+    {
+        levelerArea = c.removeFromRight (c.getWidth() / 2 - gap / 2);
+        c.removeFromRight (gap);
+        inputArea = c;
+    }
+    else
+    {
+        levelerArea = c.removeFromBottom (juce::jlimit (110, 150, c.getHeight() / 2 - gap));
+        c.removeFromBottom (gap);
+        inputArea = c;
+    }
+
+    auto a = inputArea.reduced (16, 0).withTrimmedTop (26).withTrimmedBottom (10);
     auto meters = a.removeFromLeft (34);
     meterL.setBounds (meters.removeFromLeft (15));
     meters.removeFromLeft (4);
     meterR.setBounds (meters.removeFromLeft (15));
-    a.removeFromLeft (20);
+    a.removeFromLeft (16);
 
-    auto col = a.removeFromLeft (220);
+    // The trim knob drops out of a very narrow input box rather than squashing the selector.
+    const bool roomForTrim = a.getWidth() >= 300;
+    trim.setVisible (! locked && roomForTrim);
+    auto col = a.removeFromLeft (juce::jmin (220, roomForTrim ? a.getWidth() - 96 : a.getWidth()));
     input.setBounds (col.removeFromTop (28));
-    col.removeFromTop (14);
-    inputLabelArea = col.removeFromTop (72);
-    a.removeFromLeft (20);
-    trim.setBounds (a.removeFromLeft (80).withHeight (90));
+    col.removeFromTop (8);
+    inputLabelArea = col.removeFromTop (juce::jmin (72, col.getHeight()));
+    if (roomForTrim)
+    {
+        a.removeFromLeft (16);
+        trim.setBounds (a.removeFromLeft (80).withHeight (juce::jmin (90, a.getHeight())));
+    }
 }
 } // namespace sr::ui

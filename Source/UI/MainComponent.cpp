@@ -53,7 +53,7 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
         stripContainer.addAndMakeVisible (strips.add (new StripComponent (rack, i, [this] (int idx) { selectStrip (idx); })));
 
     stripViewport.setViewedComponent (&stripContainer, false);
-    stripViewport.setScrollBarsShown (false, true);
+    stripViewport.setScrollBarsShown (true, true); // vertical only appears if the window is very short
     addAndMakeVisible (stripViewport);
 
     detailViewport.setViewedComponent (&detail, false);
@@ -108,29 +108,43 @@ void MainComponent::paint (juce::Graphics& g)
 
 void MainComponent::resized()
 {
+    // The stream computer usually has several windows stacked, so this window has to work
+    // small: narrow windows move the master section to a strip along the bottom, and short
+    // windows shrink the faders (and tuck away the pan knobs). The right-hand column also
+    // needs height, so a short window uses the bottom strip too rather than a squashed column.
+    const bool narrowBar = getWidth() < 900;
+    const bool masterAlongBottom = getWidth() < 1100 || getHeight() - topBarHeight < MasterPanel::minimumColumnHeight;
+
     auto r = getLocalBounds();
     auto bar = r.removeFromTop (topBarHeight).reduced (10, 7);
 
     logoArea = bar.removeFromLeft (30).withSizeKeepingCentre (30, 30);
-    bar.removeFromLeft (4);
-    title.setBounds (bar.removeFromLeft (120));
+    bar.removeFromLeft (6);
+    title.setVisible (! narrowBar);
+    if (! narrowBar)
+        title.setBounds (bar.removeFromLeft (114));
     if (busModeButton.isVisible())
     {
-        busModeButton.setBounds (bar.removeFromLeft (70));
-        advancedModeButton.setBounds (bar.removeFromLeft (90));
-        bar.removeFromLeft (16);
+        busModeButton.setBounds (bar.removeFromLeft (narrowBar ? 56 : 70));
+        advancedModeButton.setBounds (bar.removeFromLeft (narrowBar ? 78 : 90));
+        bar.removeFromLeft (12);
     }
     for (auto* b : { &lockButton, &scenesButton, &pluginsButton, &audioButton })
     {
         if (b->isVisible())
         {
-            b->setBounds (bar.removeFromRight (b == &lockButton ? 80 : 96));
-            bar.removeFromRight (6);
+            const int w = b == &lockButton ? (narrowBar ? 64 : 80) : (narrowBar ? 74 : 96);
+            b->setBounds (bar.removeFromRight (w));
+            bar.removeFromRight (narrowBar ? 4 : 6);
         }
     }
     status.setBounds (bar);
 
-    master.setBounds (r.removeFromRight (MasterPanel::preferredWidth));
+    master.setAlongBottom (masterAlongBottom);
+    if (masterAlongBottom)
+        master.setBounds (r.removeFromBottom (juce::jmin (MasterPanel::preferredHeight, r.getHeight() / 2)));
+    else
+        master.setBounds (r.removeFromRight (MasterPanel::preferredWidth));
 
     if (busMode)
     {
@@ -142,13 +156,14 @@ void MainComponent::resized()
     detailViewport.setVisible (showDetail);
     if (showDetail)
     {
-        detailViewport.setBounds (r.removeFromBottom (detail.getPreferredHeight() + 8));
+        detailViewport.setBounds (r.removeFromBottom (juce::jmin (detail.getPreferredHeight() + 8, r.getHeight() / 2)));
         detail.setSize (juce::jmax (detailViewport.getWidth(), detail.getPreferredWidth()), detail.getPreferredHeight());
     }
 
     stripViewport.setBounds (r);
-    const int stripHeight = r.getHeight() - (stripViewport.getHeight() < numStrips * StripComponent::preferredWidth ? 8 : 0);
-    stripContainer.setSize (numStrips * StripComponent::preferredWidth, juce::jmax (300, stripHeight));
+    const int contentWidth = numStrips * StripComponent::preferredWidth;
+    const int scrollBar = r.getWidth() < contentWidth ? stripViewport.getScrollBarThickness() : 0;
+    stripContainer.setSize (contentWidth, juce::jmax (StripComponent::minimumHeight, r.getHeight() - scrollBar));
     for (int i = 0; i < strips.size(); ++i)
         strips[i]->setBounds (i * StripComponent::preferredWidth, 4, StripComponent::preferredWidth,
                               stripContainer.getHeight() - 8);

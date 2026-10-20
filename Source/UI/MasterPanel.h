@@ -33,15 +33,25 @@ public:
     void refresh();
     void tick();
 
-    // Lays the controls out for a width and returns the height they need.
+    // Stacked layout (right-hand column): lays out for a width, returns the height needed.
     int layout (int width);
+    // Row layout (strip along the bottom of a narrow window): lays out for a height,
+    // returns the width needed.
+    int layoutAsRow (int height);
+    void setRowLayout (bool shouldUseRows) { rows = shouldUseRows; }
 
     void paint (juce::Graphics&) override;
-    void resized() override { layout (getWidth()); }
+    void resized() override
+    {
+        if (rows)
+            layoutAsRow (getHeight());
+        else
+            layout (getWidth());
+    }
 
 private:
     RackProcessor& rack;
-    bool busMode = true;
+    bool busMode = true, rows = false;
     float levelerGain = 0.0f;
 
     Toggle levOn { "LEVELER" }, compOn { "BUS COMP" }, limOn { "LIMITER" };
@@ -60,12 +70,15 @@ private:
 class MasterPanel : public juce::Component
 {
 public:
-    static constexpr int preferredWidth = 330;
+    static constexpr int preferredWidth = 370;       // as a right-hand column
+    static constexpr int minimumColumnHeight = 800; // below this it goes along the bottom
+    static constexpr int preferredHeight = 170; // as a strip along the bottom
 
     MasterPanel (RackProcessor&, PluginWindows&);
 
     void setLocked (bool);
     void setBusMode (bool);
+    void setAlongBottom (bool); // true: a horizontal strip under the mixer (narrow windows)
     void refresh(); // insert buttons
     void tick();
 
@@ -74,7 +87,7 @@ public:
 
 private:
     RackProcessor& rack;
-    bool locked = false;
+    bool locked = false, alongBottom = false;
     float limiterReduction = 0.0f, busReduction = 0.0f, levelerGain = 0.0f;
 
     LoudnessDisplay loudness;

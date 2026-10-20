@@ -59,13 +59,14 @@ void LoudnessDisplay::paint (juce::Graphics& g)
 
     r.removeFromTop (6);
     auto row = r.removeFromTop (20);
+    const bool shortLabels = getWidth() < 280; // leave room for the RESET button
     g.setFont (juce::FontOptions (13.0f));
     g.setColour (colours::dim);
-    g.drawText ("Momentary", row.removeFromLeft (76), juce::Justification::centredLeft);
+    g.drawText (shortLabels ? "Mom." : "Momentary", row.removeFromLeft (shortLabels ? 42 : 76), juce::Justification::centredLeft);
     g.setColour (colourFor (momentary));
-    g.drawText (fmt (momentary), row.removeFromLeft (50), juce::Justification::centredLeft);
+    g.drawText (fmt (momentary), row.removeFromLeft (shortLabels ? 40 : 50), juce::Justification::centredLeft);
     g.setColour (colours::dim);
-    g.drawText ("Integrated", row.removeFromLeft (70), juce::Justification::centredLeft);
+    g.drawText (shortLabels ? "Int." : "Integrated", row.removeFromLeft (shortLabels ? 30 : 70), juce::Justification::centredLeft);
     g.setColour (colourFor (integrated));
     g.drawText (fmt (integrated), row.removeFromLeft (44), juce::Justification::centredLeft);
 }
@@ -200,6 +201,67 @@ int MasterControls::layout (int width)
     return r.getY();
 }
 
+int MasterControls::layoutAsRow (int height)
+{
+    constexpr int knob = 64, gap = 6, slotW = 150;
+    const int rowH = juce::jlimit (56, 80, height - 48);
+    int x = 0;
+    auto section = [&] (int width)
+    {
+        auto a = juce::Rectangle<int> (x, 0, width, height);
+        x += width + gap;
+        return a;
+    };
+
+    levArea = section (12 + 3 * knob);
+    {
+        auto a = levArea.reduced (6, 4);
+        levOn.setBounds (a.removeFromTop (22).removeFromLeft (90));
+        a.removeFromTop (2);
+        layoutRow (a.removeFromTop (rowH), { &levTarget, &levRange, &levSpeed }, knob);
+        levMeterArea = a.removeFromTop (16).reduced (2, 3);
+    }
+
+    compArea = section (12 + 5 * knob);
+    {
+        auto a = compArea.reduced (6, 4);
+        compOn.setBounds (a.removeFromTop (22).removeFromLeft (90));
+        a.removeFromTop (2);
+        layoutRow (a.removeFromTop (rowH), { &compThr, &compRatio, &compMakeup, &compAtk, &compRel }, knob);
+    }
+
+    // Inserts in a 2 x 2 grid.
+    insertArea = section (2 * slotW + 16);
+    {
+        auto a = insertArea.reduced (8, 0).withTrimmedTop (20);
+        const int cellW = a.getWidth() / 2;
+        for (int i = 0; i < inserts.size(); ++i)
+            inserts[i]->setBounds (a.getX() + (i % 2) * cellW, a.getY() + (i / 2) * 30, cellW - 4, 28);
+    }
+
+    if (busMode)
+    {
+        verbArea = {};
+    }
+    else
+    {
+        verbArea = section (12 + 3 * knob + slotW);
+        auto a = verbArea.reduced (6, 0).withTrimmedTop (20);
+        layoutRow (a.removeFromLeft (3 * knob).withHeight (rowH), { &verbSize, &verbDamp, &verbReturn }, knob);
+        verbSlot.setBounds (a.reduced (4, 0).withHeight (30));
+    }
+
+    limArea = section (12 + 2 * knob);
+    {
+        auto a = limArea.reduced (6, 4);
+        limOn.setBounds (a.removeFromTop (22).removeFromLeft (90));
+        a.removeFromTop (2);
+        layoutRow (a.removeFromTop (rowH), { &ceiling, &limRel }, knob);
+    }
+
+    return x;
+}
+
 void MasterControls::paint (juce::Graphics& g)
 {
     drawSection (g, levArea, "");
@@ -249,6 +311,17 @@ void MasterPanel::setLocked (bool shouldLock)
 {
     locked = shouldLock;
     viewport.setVisible (! locked);
+    resized();
+    repaint();
+}
+
+void MasterPanel::setAlongBottom (bool shouldBeAlongBottom)
+{
+    if (alongBottom == shouldBeAlongBottom)
+        return;
+    alongBottom = shouldBeAlongBottom;
+    controls.setRowLayout (alongBottom);
+    viewport.setScrollBarsShown (! alongBottom, alongBottom);
     resized();
     repaint();
 }
@@ -303,6 +376,33 @@ void MasterPanel::paint (juce::Graphics& g)
 
 void MasterPanel::resized()
 {
+    if (alongBottom)
+    {
+        // Narrow window: loudness | fader + meters | controls (scrolling sideways).
+        auto r = getLocalBounds().reduced (8, 6);
+        auto info = r.removeFromLeft (juce::jlimit (230, 290, getWidth() / 4));
+        loudness.setBounds (info.removeFromTop (juce::jmin (128, info.getHeight() - 20)));
+        grArea = info.removeFromBottom (18);
+        r.removeFromLeft (8);
+
+        auto left = r.removeFromLeft (locked ? 140 : 96);
+        auto meters = left.removeFromRight (26);
+        meterL.setBounds (meters.removeFromLeft (12).withTrimmedBottom (22));
+        meters.removeFromLeft (2);
+        meterR.setBounds (meters.removeFromLeft (12).withTrimmedBottom (22));
+        fader.setBounds (left);
+
+        if (locked)
+            return;
+
+        r.removeFromLeft (8);
+        viewport.setBounds (r);
+        const int needed = controls.layoutAsRow (r.getHeight());
+        const int height = needed > r.getWidth() ? r.getHeight() - viewport.getScrollBarThickness() : r.getHeight();
+        controls.setSize (controls.layoutAsRow (height), height);
+        return;
+    }
+
     auto r = getLocalBounds().reduced (8);
     loudness.setBounds (r.removeFromTop (128));
     r.removeFromTop (8);
@@ -310,7 +410,7 @@ void MasterPanel::resized()
     grArea = r.removeFromBottom (18);
 
     // Master fader and stereo meter on the left (centred when locked).
-    auto left = locked ? r.withSizeKeepingCentre (140, r.getHeight()) : r.removeFromLeft (104);
+    auto left = locked ? r.withSizeKeepingCentre (140, r.getHeight()) : r.removeFromLeft (88);
     auto meters = left.removeFromRight (26);
     meterL.setBounds (meters.removeFromLeft (12).withTrimmedBottom (22));
     meters.removeFromLeft (2);

@@ -10,6 +10,7 @@ class StripComponent : public juce::Component
 {
 public:
     static constexpr int preferredWidth = 84;
+    static constexpr int minimumHeight = 200; // below this the mixer area scrolls vertically
 
     StripComponent (RackProcessor&, int index, std::function<void (int)> onEditClicked);
 

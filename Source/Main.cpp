@@ -24,7 +24,7 @@ public:
         setUsingNativeTitleBar (true);
         setContentOwned (new ui::MainComponent (rack, dm, settings), true);
         setResizable (true, false);
-        setResizeLimits (1000, 700, 10000, 10000);
+        setResizeLimits (560, 440, 10000, 10000);
 
         if (! restoreWindowStateFromString (settings.getValue ("window")))
             centreWithSize (getWidth(), getHeight());
