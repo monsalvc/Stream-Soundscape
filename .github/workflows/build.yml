@@ -21,15 +21,23 @@ jobs:
       - name: Test engine
         run: ./build/StreamRackTests_artefacts/Release/StreamRackTests
 
-      - name: Package app
+      - name: Sign (ad-hoc) and package as a disk image
         run: |
-          mkdir -p dist
-          ditto -c -k --keepParent build/StreamRack_artefacts/Release/StreamRack.app dist/StreamRack-macOS.zip
+          APP=build/StreamRack_artefacts/Release/StreamRack.app
+          # Ad-hoc signature: no Apple developer account needed, but without any signature
+          # macOS on Apple Silicon reports a downloaded app as "damaged".
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          mkdir -p dist/StreamRack
+          cp -R "$APP" dist/StreamRack/
+          ln -s /Applications dist/StreamRack/Applications
+          hdiutil create -volname StreamRack -srcfolder dist/StreamRack -ov -format UDZO dist/StreamRack.dmg
+          hdiutil verify dist/StreamRack.dmg
 
       - uses: actions/upload-artifact@v4
         with:
           name: StreamRack-macOS
-          path: dist/StreamRack-macOS.zip
+          path: dist/StreamRack.dmg
 
   linux-tests:
     runs-on: ubuntu-24.04

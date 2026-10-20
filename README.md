@@ -160,7 +160,10 @@ open build/StreamRack_artefacts/Release/StreamRack.app
 Every push also builds an Apple Silicon macOS app in GitHub Actions (**Actions → Build → Artifacts**).
 CI skips link-time optimisation to keep builds quick; local builds use it by default
 (`-DSTREAMRACK_LTO=OFF` turns it off, `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` makes an Intel + Apple Silicon build).
-The app isn't code-signed, so the first time you open it, right-click it and choose **Open**.
+The download is a zip containing **StreamRack.dmg**: open the disk image and drag StreamRack into
+Applications. The app has an ad-hoc signature but isn't notarized by Apple, so the first time you open
+it macOS will refuse; go to **System Settings → Privacy & Security** and click **Open Anyway**. If macOS
+still says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/StreamRack.app` once.
 
 To use an existing JUCE checkout instead of downloading it, pass `-DSTREAMRACK_JUCE_DIR=/path/to/JUCE`.
 
