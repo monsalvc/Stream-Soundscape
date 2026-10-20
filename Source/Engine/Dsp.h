@@ -39,6 +39,13 @@ namespace rbj
         return normalise ((1 + c) / 2, -(1 + c), (1 + c) / 2, 1 + alpha, -2 * c, 1 - alpha);
     }
 
+    inline BiquadCoeffs lowPass (double fs, double f, double q)
+    {
+        const double w = juce::MathConstants<double>::twoPi * clampFreq (f, fs) / fs;
+        const double c = std::cos (w), alpha = std::sin (w) / (2.0 * q);
+        return normalise ((1 - c) / 2, 1 - c, (1 - c) / 2, 1 + alpha, -2 * c, 1 - alpha);
+    }
+
     inline BiquadCoeffs peak (double fs, double f, double q, double gainDb)
     {
         const double A = std::pow (10.0, gainDb / 40.0);

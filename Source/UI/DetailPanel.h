@@ -48,6 +48,10 @@ private:
     Knob compThr { "Threshold" }, compRatio { "Ratio" }, compAtk { "Attack" }, compRel { "Release" },
         compMakeup { "Makeup" };
     Knob send { "Reverb" };
+    Knob tuneAmount { "Amount" }, tuneSpeed { "Speed" };
+    Toggle tuneOn { "TUNE" };
+    float tuneMidi = -1.0f, tuneCents = 0.0f;
+    juce::Rectangle<int> tuneReadout;
     Toggle hpfOn { "HPF" }, gateOn { "GATE" }, eqOn { "EQ" }, compOn { "COMP" };
     juce::TextButton curveButton { "CURVE" };
     EqCurve curve;

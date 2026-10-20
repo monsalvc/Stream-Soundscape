@@ -3,6 +3,7 @@
 #include "Engine/Dsp.h"
 #include "Engine/LoudnessMeter.h"
 #include "Engine/Leveler.h"
+#include "Engine/PitchCorrector.h"
 #include "Engine/RackProcessor.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <cstdio>
@@ -184,6 +185,42 @@ void testEngine()
     }
     check (buffer.getMagnitude (0, 0, block) < 1e-5f, "engine: mute silences the channel", buffer.getMagnitude (0, 0, block));
 
+    // A tuned channel and an untuned one stay time-aligned (delay compensation): the same
+    // click sent through both comes out as one click, not two.
+    {
+        sr::PluginHost host2 (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("streamrack-test"));
+        sr::RackProcessor rack2 (host2);
+        rack2.setPlayConfigDetails (numIn, 2, fs, block);
+        rack2.prepareToPlay (fs, block);
+        setParam (rack2, sr::masterId ("busMode"), 0.0f);
+        setParam (rack2, sr::masterId ("levOn"), 0.0f);
+        setParam (rack2, sr::masterId ("limOn"), 0.0f);
+        for (int s = 0; s < 2; ++s)
+        {
+            setParam (rack2, sr::stripId (s, "src"), 1.0f); // both strips listen to input 1
+            setParam (rack2, sr::stripId (s, "fader"), 0.0f);
+            setParam (rack2, sr::stripId (s, "hpfOn"), 0.0f);
+            setParam (rack2, sr::stripId (s, "eqOn"), 0.0f);
+        }
+        setParam (rack2, sr::stripId (0, "tuneOn"), 1.0f);
+
+        juce::AudioBuffer<float> buf (numIn, block);
+        std::vector<int> peaks;
+        int sampleIndex = 0;
+        for (int b = 0; b < 60; ++b)
+        {
+            buf.clear();
+            if (b == 20)
+                buf.setSample (0, 0, 1.0f);
+            rack2.processBlock (buf, midi);
+            for (int i = 0; i < block; ++i, ++sampleIndex)
+                if (std::abs (buf.getSample (0, i)) > 0.2f)
+                    peaks.push_back (sampleIndex);
+        }
+        const int spread = peaks.empty() ? 99999 : peaks.back() - peaks.front();
+        check (! peaks.empty() && spread < 8, "engine: tuned + untuned channel stay aligned (sample spread)", spread);
+    }
+
     // State round trip keeps parameters and names.
     rack.setStripName (2, "Pastor");
     setParam (rack, sr::stripId (2, "lowGain"), 3.5f);
@@ -284,6 +321,151 @@ void testBusMode()
     }
     check (maxErr < 1e-4f, "bus mode: inputs 3-4 pass to outputs 1-2 unchanged", maxErr);
 }
+//==============================================================================
+// A voice-like test tone: a fundamental plus decaying harmonics.
+float voiceSample (double& phase, double freq)
+{
+    float v = 0;
+    for (int h = 1; h <= 6; ++h)
+        v += (0.5f / (float) h) * (float) std::sin (phase * h);
+    phase += juce::MathConstants<double>::twoPi * freq / fs;
+    return 0.3f * v;
+}
+
+// Sings a sustained note `centsOff` away from A3 (220 Hz) through the tuner and returns the
+// pitch of the output (in cents relative to A3), measured with an independent detector.
+float tunedOutputCents (float centsOff, float amount, double seconds = 3.0)
+{
+    sr::PitchCorrector tuner;
+    tuner.prepare (fs, 256);
+    sr::PitchDetector measure;
+    measure.prepare (fs);
+
+    const double freq = 220.0 * std::pow (2.0, centsOff / 1200.0);
+    std::vector<float> L (256), R (256);
+    double phase = 0, sum = 0;
+    int count = 0;
+    const int blocks = (int) (seconds * fs / 256);
+    for (int b = 0; b < blocks; ++b)
+    {
+        for (size_t i = 0; i < L.size(); ++i)
+            L[i] = R[i] = voiceSample (phase, freq);
+        tuner.process (L.data(), R.data(), 256, amount, 20.0f);
+        for (size_t i = 0; i < L.size(); ++i)
+            if (measure.push (L[i]) && b > blocks / 2 && measure.getMidi() > 0)
+            {
+                sum += measure.getMidi();
+                ++count;
+            }
+    }
+    return count > 0 ? (float) ((sum / count - 57.0) * 100.0) : 9999.0f; // MIDI 57 = A3
+}
+
+void testPitchCorrection()
+{
+    // The detector itself: a 220 Hz voice tone reads as A3 (MIDI 57).
+    {
+        sr::PitchDetector d;
+        d.prepare (fs);
+        double phase = 0;
+        float midi = -1;
+        for (int i = 0; i < 48000; ++i)
+            if (d.push (voiceSample (phase, 220.0)))
+                midi = d.getMidi();
+        check (std::abs (midi - 57.0f) < 0.05f, "tuner: detector reads 220 Hz voice tone as A3", midi);
+    }
+
+    const float sharp = tunedOutputCents (40.0f, 1.0f);
+    check (std::abs (sharp) < 6.0f, "tuner: +40 cents sharp corrected to within 6 cents", sharp);
+
+    const float flat = tunedOutputCents (-35.0f, 1.0f);
+    check (std::abs (flat) < 6.0f, "tuner: -35 cents flat corrected to within 6 cents", flat);
+
+    const float half = tunedOutputCents (40.0f, 0.5f);
+    check (std::abs (half - 20.0f) < 6.0f, "tuner: 50% amount takes +40 to about +20 cents", half);
+
+    const float inTune = tunedOutputCents (0.0f, 1.0f);
+    check (std::abs (inTune) < 3.0f, "tuner: an in-tune note is left alone", inTune);
+
+    // While it is actively correcting, the level must stay steady (no crossfade "wobble").
+    {
+        sr::PitchCorrector tuner;
+        tuner.prepare (fs, 256);
+        const double freq = 196.0 * std::pow (2.0, 45.0 / 1200.0); // G3, 45 cents sharp
+        std::vector<float> L (480), R (480);
+        double phase = 0;
+        float lo = 1e9f, hi = 0;
+        for (int b = 0; b < 400; ++b) // 4 s in 10 ms blocks
+        {
+            for (size_t i = 0; i < L.size(); ++i)
+                L[i] = R[i] = voiceSample (phase, freq);
+            tuner.process (L.data(), R.data(), 480, 1.0f, 20.0f);
+            if (b > 100)
+            {
+                double e = 0;
+                for (float v : L)
+                    e += (double) v * v;
+                const float rms = (float) std::sqrt (e / 480.0);
+                lo = juce::jmin (lo, rms);
+                hi = juce::jmax (hi, rms);
+            }
+        }
+        const float wobbleDb = juce::Decibels::gainToDecibels (hi / lo);
+        check (wobbleDb < 1.0f, "tuner: level stays steady while correcting (dB swing)", wobbleDb);
+    }
+
+    // A singer sliding between notes (with silence gaps) never produces garbage.
+    {
+        sr::PitchCorrector tuner;
+        tuner.prepare (fs, 256);
+        std::vector<float> L (256), R (256);
+        double phase = 0;
+        bool finite = true;
+        float peak = 0;
+        for (int b = 0; b < 1500; ++b)
+        {
+            const double t = b * 256.0 / fs;
+            const double freq = 150.0 * std::pow (2.0, std::sin (t * 0.7) * 1.5); // slow slides over +/-1.5 octaves
+            const bool gap = std::fmod (t, 2.0) > 1.7;
+            for (size_t i = 0; i < L.size(); ++i)
+                L[i] = R[i] = gap ? 0.0f : voiceSample (phase, freq);
+            tuner.process (L.data(), R.data(), 256, 1.0f, 15.0f);
+            for (float v : L)
+            {
+                finite = finite && std::isfinite (v);
+                peak = juce::jmax (peak, std::abs (v));
+            }
+        }
+        check (finite && peak < 1.0f, "tuner: sliding notes and gaps stay clean (peak)", peak);
+    }
+
+    // Its reported latency matches reality, so delay compensation lines channels up.
+    {
+        sr::PitchCorrector tuner;
+        tuner.prepare (fs, 256);
+        std::vector<float> L (256, 0.0f), R (256, 0.0f);
+        int peakAt = -1, sample = 0;
+        float peak = 0;
+        for (int b = 0; b < 40; ++b)
+        {
+            std::fill (L.begin(), L.end(), 0.0f);
+            std::fill (R.begin(), R.end(), 0.0f);
+            if (b == 4)
+                L[0] = R[0] = 1.0f;
+            tuner.process (L.data(), R.data(), 256, 0.0f, 20.0f);
+            for (int i = 0; i < 256; ++i, ++sample)
+                if (std::abs (L[(size_t) i]) > peak)
+                {
+                    peak = std::abs (L[(size_t) i]);
+                    peakAt = sample;
+                }
+        }
+        const int measured = peakAt - 4 * 256;
+        check (std::abs (measured - tuner.getLatencySamples()) < 48, "tuner: reported latency matches (samples)",
+               (double) measured - tuner.getLatencySamples());
+    }
+}
+
 //==============================================================================
 // Network audio devices (Dante Virtual Soundcard, Waves SoundGrid Driver) reach the app as an
 // ordinary multichannel audio device. This fake device lets the tests drive the real
@@ -452,6 +634,7 @@ int main()
     testEq();
     testCompressor();
     testLeveler();
+    testPitchCorrection();
     testEngine();
     testBusMode();
     testNetworkDevices();

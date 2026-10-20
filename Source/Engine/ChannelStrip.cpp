@@ -17,7 +17,8 @@ void ChannelStrip::bind (juce::AudioProcessorValueTreeState& state, int stripInd
           get ("m1Gain"),  get ("m1Freq"),   get ("m1Q"),      get ("m2Gain"),  get ("m2Freq"),
           get ("m2Q"),     get ("highGain"), get ("highFreq"), get ("compOn"),  get ("compThr"),
           get ("compRatio"), get ("compAtk"), get ("compRel"), get ("compMakeup"), get ("send"),
-          get ("pan"),     get ("fader"),    get ("mute") };
+          get ("pan"),     get ("fader"),    get ("mute"),     get ("tuneOn"), get ("tuneAmount"),
+          get ("tuneSpeed") };
 
     for (int i = 0; i < slotsPerStrip; ++i)
         slots[(size_t) i] = std::make_unique<PluginSlot> (stripId (index, "slot") + juce::String (i));
@@ -38,6 +39,8 @@ void ChannelStrip::prepare (double sampleRate, int maxBlockSize)
 
     filterKey.fill (-1.0f);
     updateFilters();
+    tuner.prepare (fs, maxBlock);
+    tunerWasOn = false;
     gate.prepare (fs);
     comp.prepare (fs);
     delay.prepare();
@@ -79,7 +82,7 @@ void ChannelStrip::updateFilters() noexcept
 
 int ChannelStrip::getLatencySamples() const noexcept
 {
-    int total = 0;
+    int total = p.tuneOn->load() > 0.5f ? tuner.getLatencySamples() : 0;
     for (auto& s : slots)
         total += s->getLatencySamples();
     return total;
@@ -116,6 +119,18 @@ void ChannelStrip::process (const float* const* inputs, int numInputs, int n, in
             stage[0].processBlock (L, n);
             stage[1].processBlock (R, n);
         }
+
+    if (p.tuneOn->load() > 0.5f)
+    {
+        if (! tunerWasOn)
+            tuner.reset();
+        tunerWasOn = true;
+        tuner.process (L, R, n, p.tuneAmount->load() * 0.01f, p.tuneSpeed->load());
+    }
+    else
+    {
+        tunerWasOn = false;
+    }
 
     if (p.gateOn->load() > 0.5f)
     {

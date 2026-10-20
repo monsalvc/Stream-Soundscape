@@ -82,6 +82,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         addBool (layout, id ("hpfOn"), n + "HPF On", true);
         addHz (layout, id ("hpfFreq"), n + "HPF Freq", 20.0f, 400.0f, 80.0f);
 
+        addBool (layout, id ("tuneOn"), n + "Tune On", false);
+        addFloat (layout, id ("tuneAmount"), n + "Tune Amount", { 0.0f, 100.0f, 1.0f }, 70.0f,
+                  [] (float v, int) { return juce::String (juce::roundToInt (v)) + "%"; });
+        addMs (layout, id ("tuneSpeed"), n + "Tune Speed", 5.0f, 200.0f, 40.0f);
+
         addBool (layout, id ("gateOn"), n + "Gate On", false);
         addDb (layout, id ("gateThr"), n + "Gate Threshold", -80.0f, 0.0f, -50.0f);
 

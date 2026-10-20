@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Dsp.h"
+#include "PitchCorrector.h"
 #include "Params.h"
 #include "PluginSlot.h"
 #include <array>
@@ -8,7 +9,7 @@
 
 namespace sr
 {
-// One input channel: input select -> trim -> HPF -> gate -> 4-band EQ -> compressor
+// One input channel: input select -> trim -> HPF -> tuner -> gate -> 4-band EQ -> compressor
 // -> 2 plugin inserts -> delay compensation -> pan/fader -> stream mix (+ reverb send).
 // Everything runs in stereo; a mono source is duplicated to both sides.
 class ChannelStrip
@@ -25,6 +26,7 @@ public:
     int getLatencySamples() const noexcept;
 
     PluginSlot& getSlot (int i) { return *slots[(size_t) i]; }
+    const PitchCorrector& getTuner() const noexcept { return tuner; }
     int getIndex() const noexcept { return index; }
 
     // Metering, read by the UI.
@@ -37,7 +39,7 @@ private:
     {
         std::atomic<float>*src, *stereo, *trim, *hpfOn, *hpfFreq, *gateOn, *gateThr, *eqOn, *lowGain, *lowFreq,
             *m1Gain, *m1Freq, *m1Q, *m2Gain, *m2Freq, *m2Q, *highGain, *highFreq, *compOn, *compThr, *compRatio,
-            *compAtk, *compRel, *compMakeup, *send, *pan, *fader, *mute;
+            *compAtk, *compRel, *compMakeup, *send, *pan, *fader, *mute, *tuneOn, *tuneAmount, *tuneSpeed;
     };
 
     void updateFilters() noexcept;
@@ -51,6 +53,8 @@ private:
     std::array<std::array<Biquad, 2>, 2> hpf {}; // [stage][channel]
     std::array<std::array<Biquad, 2>, 4> eq {};  // [band][channel]
     std::array<float, 11> filterKey {};
+    PitchCorrector tuner;
+    bool tunerWasOn = false;
     Gate gate;
     Compressor comp;
     CompensationDelay delay;

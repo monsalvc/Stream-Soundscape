@@ -19,6 +19,7 @@ DetailPanel::DetailPanel (RackProcessor& r, PluginWindows& windows)
 
     sections = {
         { "INPUT", { &trim, &hpfOn, &hpfFreq }, {} },
+        { "PITCH", { &tuneOn, &tuneAmount, &tuneSpeed }, {} },
         { "GATE", { &gateOn, &gateThr }, {} },
         { "EQ", { &eqOn, &lowGain, &lowFreq, &m1Gain, &m1Freq, &m1Q, &m2Gain, &m2Freq, &m2Q, &highGain, &highFreq }, {} },
         { "COMPRESSOR", { &compOn, &compThr, &compRatio, &compAtk, &compRel, &compMakeup }, {} },
@@ -30,6 +31,11 @@ DetailPanel::DetailPanel (RackProcessor& r, PluginWindows& windows)
         for (auto* c : s.items)
             addAndMakeVisible (c);
     addAndMakeVisible (slot2);
+
+    tuneOn.onClick = [this] { repaint (tuneReadout); };
+    tuneOn.setTooltip ("Pitch correction for a single voice: nudges each sung note toward the nearest semitone");
+    tuneAmount.slider.setTooltip ("How far toward the note (100% = fully in tune; 50-80% sounds most natural)");
+    tuneSpeed.slider.setTooltip ("How quickly it corrects (slower keeps natural slides and vibrato)");
 
     curveButton.setClickingTogglesState (true);
     curveButton.setTooltip ("Show the EQ as a graph you can drag");
@@ -61,6 +67,9 @@ void DetailPanel::setStrip (int index)
     auto id = [this] (const char* n) { return stripId (strip, n); };
 
     trim.attach (state, id ("trim"));
+    tuneOn.attach (state, id ("tuneOn"));
+    tuneAmount.attach (state, id ("tuneAmount"));
+    tuneSpeed.attach (state, id ("tuneSpeed"));
     hpfOn.attach (state, id ("hpfOn"));
     hpfFreq.attach (state, id ("hpfFreq"));
     gateOn.attach (state, id ("gateOn"));
@@ -104,6 +113,15 @@ void DetailPanel::tick()
     if (strip < 0)
         return;
     curve.tick();
+
+    const auto& tuner = rack.getStrip (strip).getTuner();
+    const float midi = tuner.detectedMidi.load(), cents = tuner.correctionCents.load();
+    if (std::abs (midi - tuneMidi) > 0.02f || std::abs (cents - tuneCents) > 0.5f)
+    {
+        tuneMidi = midi;
+        tuneCents = cents;
+        repaint (tuneReadout);
+    }
     const float gr = rack.getStrip (strip).compReductionDb.load();
     if (std::abs (gr - compReduction) > 0.2f)
     {
@@ -133,6 +151,24 @@ void DetailPanel::paint (juce::Graphics& g)
     for (auto& s : sections)
         drawSection (g, s.area, s.title);
 
+    // Pitch readout in the PITCH header: the note being sung and the correction applied.
+    if (! tuneReadout.isEmpty() && tuneOn.getToggleState())
+    {
+        static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        juce::String text ("--");
+        if (tuneMidi > 0.0f)
+        {
+            const int note = juce::roundToInt (tuneMidi);
+            const int off = juce::roundToInt ((tuneMidi - (float) note) * 100.0f);
+            text = juce::String (names[((note % 12) + 12) % 12]) + juce::String (note / 12 - 1) + " "
+                   + (off >= 0 ? "+" : "") + juce::String (off) + "c";
+        }
+        const bool correcting = std::abs (tuneCents) > 3.0f;
+        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.setColour (correcting ? colours::amber : colours::green);
+        g.drawText (text, tuneReadout, juce::Justification::centredRight);
+    }
+
     if (! grArea.isEmpty())
     {
         g.setColour (colours::background);
@@ -161,7 +197,7 @@ void DetailPanel::resized()
 
         auto inner = s.area.reduced (gap, 0).withTrimmedTop (20).withTrimmedBottom (4);
 
-        if (&s == &sections[2])
+        if (&s == &sections[3])
         {
             // EQ: on/off and CURVE stacked in the first column, then knobs or the curve.
             auto column = inner.removeFromLeft (toggleWidth).withHeight (100);
@@ -193,8 +229,10 @@ void DetailPanel::resized()
         }
     }
 
+    tuneReadout = sections[1].area.withHeight (18).reduced (8, 0).withTrimmedLeft (40);
+
     // Gain reduction meter sits at the right edge of the compressor section.
-    const auto& comp = sections[3].area;
+    const auto& comp = sections[4].area;
     grArea = juce::Rectangle<int> (comp.getRight() - gap - 6, comp.getY() + 22, 6, juce::jmin (comp.getHeight() - 30, 94));
 }
 } // namespace sr::ui

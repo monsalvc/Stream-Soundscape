@@ -35,9 +35,15 @@ Switch with the **Bus | Advanced** buttons at the top left. The mode is saved wi
 - **Loudness meter** (ITU-R BS.1770 / EBU R128): momentary, short-term and integrated loudness
   against the -14 LUFS YouTube target. Green means on target, amber means quiet, red means hot.
 - **Advanced mode channels:** 24 strips fed from any of 64 Dante inputs, mono or stereo, each with
-  trim, 24 dB/oct high-pass, gate, 4-band EQ, compressor, two plugin inserts, pan, fader and a send to a
+  trim, 24 dB/oct high-pass, pitch correction, gate, 4-band EQ, compressor, two plugin inserts, pan, fader and a send to a
   shared reverb bus (built-in reverb, or a plugin in the reverb bus slot). Plugin latency is compensated
   between channels so inserts don't cause phasing.
+- **Vocal pitch correction (Advanced mode):** press **TUNE** in a channel's PITCH section to gently pull
+  a singer toward the nearest note, for the stream only (the room still hears the live voice).
+  **Amount** sets how far (50-80% sounds natural; 100% is fully in tune) and **Speed** how quickly
+  (slower keeps slides and vibrato). The header shows the note being sung and how far off it is.
+  It works on one voice per channel, so use it on lead and solo vocal mics, not on choir or band channels.
+  It adds about 28 ms of delay, and the other channels are delayed to match automatically.
 - **EQ curve view:** press **CURVE** in a channel's EQ section to swap the knobs for a frequency-response
   graph of its high-pass and EQ. Drag a point to set frequency and gain, scroll over a mid band to change
   its Q, double-click a point to reset its gain. The choice is remembered.
@@ -167,10 +173,11 @@ To use an existing JUCE checkout instead of downloading it, pass `-DSTREAMRACK_J
 | `Source/Engine/Dsp.h` | EQ filters, compressor, gate, limiter, delay compensation |
 | `Source/Engine/LoudnessMeter.h` | BS.1770 loudness measurement |
 | `Source/Engine/Leveler.h` | Automatic leveler |
+| `Source/Engine/PitchCorrector.h` | Vocal pitch detection (YIN) and pitch-synchronous shifter |
 | `Source/Engine/PluginSlot.*`, `PluginHost.*` | VST3/AU hosting |
 | `Source/Engine/Params.*` | Every parameter, its range and its default |
 | `Source/UI/*` | Main window, Bus mode screen, strips, channel editor and EQ curve, master panel, plugin windows |
-| `Tests/EngineTests.cpp` | Headless tests: loudness against EBU reference signals, limiter ceiling, EQ, compressor, leveler, Bus mode and channel routing, state, and the full device path with simulated Dante/SoundGrid-style devices (channel counts, 44.1-96 kHz, 32-1024 sample buffers) |
+| `Tests/EngineTests.cpp` | Headless tests: loudness against EBU reference signals, limiter ceiling, EQ, compressor, leveler, pitch correction accuracy/stability/latency, Bus mode and channel routing, state, and the full device path with simulated Dante/SoundGrid-style devices (channel counts, 44.1-96 kHz, 32-1024 sample buffers) |
 
 ## Licensing
 
