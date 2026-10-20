@@ -111,6 +111,10 @@ set the plugin to 100% wet, and the channels' Reverb knobs control how much each
    - This Mac's DVS transmit channels **1-2** → the Wirecast Mac's DVS receive channels that Wirecast
      already uses. StreamRack sends the finished mix to every output pair, so 1-2 is all you need.
 4. In Bus mode, pick the Dante pair the bus arrives on in **STREAM BUS IN** and check the meters move.
+   If the WING sends several buses (say the stream bus on 1-2 and a youth-service bus on 3-4),
+   select each pair and click **Name...**. Every named pair gets a one-click button under the
+   dropdown with a dot that lights when that pair has signal. Switching crossfades over 50 ms, so it
+   doesn't click on the stream. Names are saved with the session and in scenes.
 
 ### 3. The Wirecast Mac
 

@@ -2,6 +2,53 @@
 
 namespace sr::ui
 {
+namespace
+{
+    juce::String pairLabel (int pair) { return juce::String (pair * 2 + 1) + "-" + juce::String (pair * 2 + 2); }
+} // namespace
+
+//==============================================================================
+void PairButton::setActivity (float peakDb)
+{
+    const float db = peakDb > activityDb ? peakDb : juce::jmax (peakDb, activityDb - 1.0f);
+    const auto bucket = [] (float v) { return v > -3.0f ? 2 : (v > -50.0f ? 1 : 0); };
+    const bool changed = bucket (db) != bucket (activityDb);
+    activityDb = db;
+    if (changed)
+        repaint();
+}
+
+void PairButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    auto r = getLocalBounds().toFloat().reduced (1.0f);
+    const bool selected = getToggleState();
+    auto fill = selected ? colours::accent : colours::panelRaised;
+    if (! selected && (highlighted || down))
+        fill = fill.brighter (0.15f);
+    if (! isEnabled())
+        fill = fill.withMultipliedAlpha (0.6f);
+    g.setColour (fill);
+    g.fillRoundedRectangle (r, 5.0f);
+
+    // Signal dot: green with signal, red when hot, an empty ring when silent.
+    auto dot = r.removeFromLeft (24.0f).withSizeKeepingCentre (9.0f, 9.0f);
+    if (activityDb > -50.0f)
+    {
+        g.setColour (activityDb > -3.0f ? colours::red : (selected ? colours::onAccent : colours::green));
+        g.fillEllipse (dot);
+    }
+    else
+    {
+        g.setColour ((selected ? colours::onAccent : colours::dim).withAlpha (0.7f));
+        g.drawEllipse (dot, 1.2f);
+    }
+
+    g.setColour (selected ? colours::onAccent : colours::text);
+    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    g.drawFittedText (getButtonText(), r.toNearestInt().withTrimmedRight (8), juce::Justification::centredLeft, 1);
+}
+
+//==============================================================================
 BusPanel::BusPanel (RackProcessor& r) : rack (r)
 {
     if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (rack.state.getParameter (masterId ("busSrc"))))
@@ -10,6 +57,11 @@ BusPanel::BusPanel (RackProcessor& r) : rack (r)
     input.setTooltip ("The two Dante channels carrying the stream bus (left, right)");
     inputAttachment = std::make_unique<Apvts::ComboBoxAttachment> (rack.state, masterId ("busSrc"), input);
     addAndMakeVisible (input);
+
+    renameButton.setTooltip ("Name the selected Dante pair (e.g. \"Stream bus\") to get a one-click button for it");
+    renameButton.onClick = [this] { renameCurrentPair(); };
+    addAndMakeVisible (renameButton);
+    refreshPairNames();
 
     trim.attach (rack.state, masterId ("busTrim"));
     addAndMakeVisible (trim);
@@ -21,12 +73,93 @@ void BusPanel::setLocked (bool shouldLock)
 {
     locked = shouldLock;
     input.setEnabled (! locked);
+    for (auto* b : picks)
+        b->setEnabled (! locked);
     resized();
     repaint();
 }
 
+int BusPanel::selectedPair() const
+{
+    return (int) rack.state.getRawParameterValue (masterId ("busSrc"))->load();
+}
+
+void BusPanel::refreshPairNames()
+{
+    juce::StringArray names;
+    for (int pair = 0; pair < maxInputs / 2; ++pair)
+        names.add (rack.getPairName (pair));
+    if (names == pairNames)
+        return;
+    pairNames = names;
+
+    picks.clear();
+    for (int pair = 0; pair < pairNames.size(); ++pair)
+    {
+        const auto& name = pairNames[pair];
+        input.changeItemText (pair + 1, "Dante " + pairLabel (pair) + (name.isNotEmpty() ? ":  " + name : juce::String()));
+        if (name.isEmpty())
+            continue;
+
+        auto* b = picks.add (new PairButton (pair));
+        b->setButtonText (name);
+        b->setTooltip ("Dante " + pairLabel (pair));
+        b->setEnabled (! locked);
+        b->onClick = [this, pair]
+        {
+            if (auto* p = rack.state.getParameter (masterId ("busSrc")))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->convertTo0to1 ((float) pair));
+                p->endChangeGesture();
+            }
+        };
+        addChildComponent (b);
+    }
+
+    // A ComboBox forgets its selection when the selected item's text changes.
+    input.setSelectedId (selectedPair() + 1, juce::dontSendNotification);
+    resized();
+    repaint();
+}
+
+void BusPanel::renameCurrentPair()
+{
+    const int pair = selectedPair();
+
+    auto* window = new juce::AlertWindow ("Name Dante " + pairLabel (pair),
+                                          "What does the WING send on this pair? For example \"Stream bus\" or "
+                                          "\"Youth bus\". Leave it empty to remove the name.",
+                                          juce::MessageBoxIconType::NoIcon, this);
+    window->addTextEditor ("text", rack.getPairName (pair));
+    window->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<juce::AlertWindow> safeWindow (window);
+    juce::Component::SafePointer<BusPanel> safeThis (this);
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([safeWindow, safeThis, pair] (int result)
+    {
+        if (result == 1 && safeWindow != nullptr && safeThis != nullptr)
+        {
+            safeThis->rack.setPairName (pair, safeWindow->getTextEditorContents ("text"));
+            safeThis->refreshPairNames();
+        }
+    }), true);
+}
+
 void BusPanel::tick()
 {
+    refreshPairNames(); // a scene recall can change the names
+
+    const int current = selectedPair();
+    for (auto* b : picks)
+    {
+        const float peak = juce::jmax (rack.inputPeaks[(size_t) (b->pair * 2)].exchange (0.0f),
+                                       rack.inputPeaks[(size_t) (b->pair * 2 + 1)].exchange (0.0f));
+        b->setActivity (juce::Decibels::gainToDecibels (peak, -100.0f));
+        b->setToggleState (b->pair == current, juce::dontSendNotification);
+    }
+
     const float l = rack.busInPeakL.exchange (0.0f), r = rack.busInPeakR.exchange (0.0f);
     meterL.setLevel (l);
     meterR.setLevel (r);
@@ -64,6 +197,15 @@ void BusPanel::paint (juce::Graphics& g)
         g.setFont (juce::FontOptions (12.0f));
         g.drawFittedText (silent ? "No signal: check Dante routing" : (hot ? "Very hot: lower the trim" : "dBFS peak"),
                           a.removeFromTop (18), juce::Justification::centredLeft, 1);
+    }
+
+    // Until a pair is named there are no quick buttons; say how to get them.
+    if (picks.isEmpty() && ! picksArea.isEmpty())
+    {
+        g.setColour (colours::dim);
+        g.setFont (juce::FontOptions (12.0f));
+        g.drawFittedText ("Several buses on Dante? Click Name... to label each pair and get a one-click button for it.",
+                          picksArea, juce::Justification::centredLeft, 2);
     }
 
     // Leveler: big readout plus a bar from the centre (right = boosting, left = cutting).
@@ -172,17 +314,51 @@ void BusPanel::resized()
     meterR.setBounds (meters.removeFromLeft (15));
     a.removeFromLeft (16);
 
+    // Quick-pick row along the bottom of the input box, when there's room for it.
+    const bool showPicks = a.getHeight() >= 28 + 8 + 52 + 8 + 30 && (! picks.isEmpty() || ! locked);
+    picksArea = showPicks ? a.removeFromBottom (30) : juce::Rectangle<int>();
+    if (showPicks)
+        a.removeFromBottom (8);
+    layoutPicks();
+
     // The trim knob drops out of a very narrow input box rather than squashing the selector.
     const bool roomForTrim = a.getWidth() >= 300;
     trim.setVisible (! locked && roomForTrim);
-    auto col = a.removeFromLeft (juce::jmin (220, roomForTrim ? a.getWidth() - 96 : a.getWidth()));
-    input.setBounds (col.removeFromTop (28));
+    auto col = a.removeFromLeft (juce::jmin (300, roomForTrim ? a.getWidth() - 96 : a.getWidth()));
+    auto row = col.removeFromTop (28);
+    renameButton.setVisible (! locked);
+    if (! locked)
+    {
+        renameButton.setBounds (row.removeFromRight (70));
+        row.removeFromRight (6);
+    }
+    input.setBounds (row);
     col.removeFromTop (8);
     inputLabelArea = col.removeFromTop (juce::jmin (72, col.getHeight()));
     if (roomForTrim)
     {
         a.removeFromLeft (16);
         trim.setBounds (a.removeFromLeft (80).withHeight (juce::jmin (90, a.getHeight())));
+    }
+}
+
+void BusPanel::layoutPicks()
+{
+    // As many buttons as fit at a readable width; the dropdown always has every pair.
+    constexpr int gap = 6, minW = 96, maxW = 170;
+    const int fit = picksArea.isEmpty() ? 0 : juce::jmax (1, (picksArea.getWidth() + gap) / (minW + gap));
+    const int shown = juce::jmin (fit, picks.size());
+    const int w = shown > 0 ? juce::jmin (maxW, (picksArea.getWidth() + gap) / shown - gap) : 0;
+
+    auto r = picksArea;
+    for (int i = 0; i < picks.size(); ++i)
+    {
+        picks[i]->setVisible (i < shown);
+        if (i < shown)
+        {
+            picks[i]->setBounds (r.removeFromLeft (w));
+            r.removeFromLeft (gap);
+        }
     }
 }
 } // namespace sr::ui

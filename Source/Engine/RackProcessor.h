@@ -58,6 +58,11 @@ public:
     juce::String getStripName (int i) const;
     void setStripName (int i, const juce::String& name);
 
+    // Optional names for the Dante input pairs (e.g. "Stream bus", "Youth bus"), so the bus
+    // you want can be picked by name. Empty when the pair hasn't been named.
+    juce::String getPairName (int pair) const;
+    void setPairName (int pair, const juce::String& name);
+
     // Message thread. Loads a plugin into a slot (or clears it when desc is null).
     bool loadPlugin (PluginSlot&, const juce::PluginDescription* desc, juce::String& error);
 
@@ -73,6 +78,7 @@ public:
     std::atomic<float> masterPeakL { 0.0f }, masterPeakR { 0.0f }; // UI resets after reading
     std::atomic<float> limiterReductionDb { 0.0f }, busCompReductionDb { 0.0f }, levelerGainDb { 0.0f };
     std::atomic<float> busInPeakL { 0.0f }, busInPeakR { 0.0f }; // bus mode input, UI resets after reading
+    std::array<std::atomic<float>, maxInputs> inputPeaks {};       // every input, UI resets after reading
 
 private:
     PluginSlot* findSlot (const juce::String& id);
@@ -92,6 +98,9 @@ private:
     Leveler leveler;
     juce::SmoothedValue<float> masterGain, verbReturn, busTrim;
     int maxBlock = 512;
+
+    // Changing the bus input crossfades from the old pair so the switch doesn't click.
+    int activePair = -1, fadeFromPair = -1, fadePos = 0, fadeLength = 2400;
 
     struct MasterRefs
     {

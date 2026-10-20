@@ -320,6 +320,36 @@ void testBusMode()
                                      std::abs (buffer.getSample (1, i) + 0.5f));
     }
     check (maxErr < 1e-4f, "bus mode: inputs 3-4 pass to outputs 1-2 unchanged", maxErr);
+
+    // Switching to another bus (inputs 1-2) crossfades instead of jumping.
+    setParam (rack, sr::masterId ("busSrc"), 0.0f);
+    float maxStep = 0, last = buffer.getSample (0, block - 1), settled = 0;
+    for (int b = 0; b < 30; ++b)
+    {
+        buffer.clear();
+        for (int i = 0; i < block; ++i)
+        {
+            buffer.setSample (0, i, 0.9f);
+            buffer.setSample (1, i, 0.9f);
+            buffer.setSample (2, i, 0.25f);
+            buffer.setSample (3, i, -0.5f);
+        }
+        rack.processBlock (buffer, midi);
+        for (int i = 0; i < block; ++i)
+        {
+            maxStep = juce::jmax (maxStep, std::abs (buffer.getSample (0, i) - last));
+            last = buffer.getSample (0, i);
+        }
+        settled = buffer.getSample (0, block - 1);
+    }
+    check (maxStep < 0.01f, "bus mode: switching buses crossfades (largest sample step)", maxStep);
+    check (std::abs (settled - 0.9f) < 1e-4f, "bus mode: switch ends on the new bus", settled);
+
+    // Pair names survive loading a scene saved before they were set.
+    const auto oldScene = rack.createStateTree();
+    rack.setPairName (1, "Stream bus");
+    rack.restoreStateTree (oldScene);
+    check (rack.getPairName (1) == "Stream bus", "bus mode: pair names kept when an older scene loads", 0);
 }
 //==============================================================================
 // A voice-like test tone: a fundamental plus decaying harmonics.

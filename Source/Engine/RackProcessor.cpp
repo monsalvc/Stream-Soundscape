@@ -12,6 +12,7 @@ namespace
     const juce::Identifier descTag ("PLUGIN");
 
     juce::Identifier nameProp (int strip) { return "name" + juce::String (strip); }
+    juce::Identifier pairNameProp (int pair) { return "pairName" + juce::String (pair); }
 
     float peakOf (const float* data, int n) noexcept
     {
@@ -82,6 +83,8 @@ void RackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamples
     limiter.prepare (sampleRate);
     leveler.prepare (sampleRate);
     busTrim.reset (sampleRate, 0.05);
+    fadeLength = juce::jmax (1, (int) (sampleRate * 0.05));
+    fadeFromPair = -1;
     loudness.prepare (sampleRate);
     masterGain.reset (sampleRate, 0.05);
     verbReturn.reset (sampleRate, 0.05);
@@ -130,6 +133,10 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
 void RackProcessor::processChunk (const float* const* inputs, int numInputs, float* outL, float* outR, int n) noexcept
 {
+    for (int ch = 0; ch < numInputs; ++ch)
+        if (const float p = peakOf (inputs[ch], n); p > inputPeaks[(size_t) ch].load())
+            inputPeaks[(size_t) ch] = p;
+
     auto* sendL = send.getWritePointer (0);
     auto* sendR = send.getWritePointer (1);
     juce::FloatVectorOperations::clear (outL, n);
@@ -140,11 +147,47 @@ void RackProcessor::processChunk (const float* const* inputs, int numInputs, flo
     if (m.busMode->load() > 0.5f)
     {
         // Bus mode: the selected input pair is the mix.
-        const int first = (int) m.busSrc->load() * 2;
-        if (first < numInputs)
+        const auto copyPair = [&] (int pair, float* l, float* r)
         {
-            juce::FloatVectorOperations::copy (outL, inputs[first], n);
-            juce::FloatVectorOperations::copy (outR, inputs[first + 1 < numInputs ? first + 1 : first], n);
+            const int first = pair * 2;
+            if (first >= numInputs)
+                return false;
+            juce::FloatVectorOperations::copy (l, inputs[first], n);
+            juce::FloatVectorOperations::copy (r, inputs[first + 1 < numInputs ? first + 1 : first], n);
+            return true;
+        };
+
+        const int pair = (int) m.busSrc->load();
+        if (activePair < 0)
+            activePair = pair;
+        if (pair != activePair && fadeFromPair < 0)
+        {
+            fadeFromPair = activePair;
+            activePair = pair;
+            fadePos = 0;
+        }
+        copyPair (activePair, outL, outR);
+
+        if (fadeFromPair >= 0)
+        {
+            // Equal-power crossfade: the two buses are unrelated signals. The send buffer is
+            // free in bus mode, so it holds the old pair while fading.
+            if (! copyPair (fadeFromPair, sendL, sendR))
+            {
+                juce::FloatVectorOperations::clear (sendL, n);
+                juce::FloatVectorOperations::clear (sendR, n);
+            }
+            for (int i = 0; i < n; ++i)
+            {
+                const float t = juce::jmin (1.0f, (float) (fadePos + i) / (float) fadeLength);
+                const float in = std::sin (t * juce::MathConstants<float>::halfPi);
+                const float out = std::cos (t * juce::MathConstants<float>::halfPi);
+                outL[i] = outL[i] * in + sendL[i] * out;
+                outR[i] = outR[i] * in + sendR[i] * out;
+            }
+            fadePos += n;
+            if (fadePos >= fadeLength)
+                fadeFromPair = -1;
         }
 
         busTrim.setTargetValue (juce::Decibels::decibelsToGain (m.busTrim->load()));
@@ -259,6 +302,16 @@ void RackProcessor::setStripName (int i, const juce::String& name)
     state.state.setProperty (nameProp (i), name.trim(), nullptr);
 }
 
+juce::String RackProcessor::getPairName (int pair) const
+{
+    return state.state.getProperty (pairNameProp (pair)).toString();
+}
+
+void RackProcessor::setPairName (int pair, const juce::String& name)
+{
+    state.state.setProperty (pairNameProp (pair), name.trim(), nullptr);
+}
+
 PluginSlot* RackProcessor::findSlot (const juce::String& id)
 {
     PluginSlot* found = nullptr;
@@ -323,6 +376,13 @@ void RackProcessor::restoreStateTree (const juce::ValueTree& source)
         return;
 
     auto tree = source.createCopy();
+
+    // Pair names describe the Dante routing rather than a scene, so a scene saved before
+    // they were set keeps the current ones.
+    for (int pair = 0; pair < maxInputs / 2; ++pair)
+        if (! tree.hasProperty (pairNameProp (pair)) && state.state.hasProperty (pairNameProp (pair)))
+            tree.setProperty (pairNameProp (pair), state.state.getProperty (pairNameProp (pair)), nullptr);
+
     const auto slotsTree = tree.getChildWithName (slotsTag);
     tree.removeChild (slotsTree, nullptr);
     state.replaceState (tree);
