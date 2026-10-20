@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include <BinaryData.h>
 
 namespace sr::ui
 {
@@ -19,6 +20,7 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
     juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel); // dialogs and plugin windows too
     setLookAndFeel (&lookAndFeel);
 
+    logo = juce::ImageCache::getFromMemory (BinaryData::icon_png, BinaryData::icon_pngSize);
     title.setText ("StreamRack", juce::dontSendNotification);
     title.setFont (juce::FontOptions (18.0f, juce::Font::bold));
     addAndMakeVisible (title);
@@ -94,6 +96,9 @@ void MainComponent::paint (juce::Graphics& g)
     g.setColour (colours::panel);
     g.fillRect (getLocalBounds().removeFromTop (topBarHeight));
 
+    if (logo.isValid())
+        g.drawImage (logo, logoArea.toFloat(), juce::RectanglePlacement::centred);
+
     if (locked)
     {
         g.setColour (colours::amber);
@@ -106,6 +111,8 @@ void MainComponent::resized()
     auto r = getLocalBounds();
     auto bar = r.removeFromTop (topBarHeight).reduced (10, 7);
 
+    logoArea = bar.removeFromLeft (30).withSizeKeepingCentre (30, 30);
+    bar.removeFromLeft (4);
     title.setBounds (bar.removeFromLeft (120));
     if (busModeButton.isVisible())
     {

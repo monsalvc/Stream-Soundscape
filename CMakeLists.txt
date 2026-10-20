@@ -44,8 +44,11 @@ juce_add_gui_app(StreamRack
     COMPANY_NAME "StreamRack"
     BUNDLE_ID "org.streamrack.app"
     VERSION ${PROJECT_VERSION}
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon.png"
     MICROPHONE_PERMISSION_ENABLED TRUE
     MICROPHONE_PERMISSION_TEXT "StreamRack needs audio input access to receive Dante channels.")
+
+juce_add_binary_data(StreamRackAssets SOURCES Resources/icon.png)
 
 target_sources(StreamRack PRIVATE
     ${ENGINE_SOURCES}
@@ -60,7 +63,7 @@ target_sources(StreamRack PRIVATE
 
 target_include_directories(StreamRack PRIVATE Source)
 target_compile_definitions(StreamRack PRIVATE ${COMMON_DEFINITIONS} JUCE_APPLICATION_NAME_STRING="StreamRack" JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}")
-target_link_libraries(StreamRack PRIVATE ${COMMON_MODULES}
+target_link_libraries(StreamRack PRIVATE ${COMMON_MODULES} StreamRackAssets
     juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
 # Link-time optimisation makes the app slightly faster but the build much slower; CI turns it off.

@@ -53,6 +53,8 @@ private:
     PluginWindows pluginWindows;
 
     juce::Label title, status;
+    juce::Image logo;
+    juce::Rectangle<int> logoArea;
     juce::TextButton audioButton { "Audio..." }, pluginsButton { "Plugins..." }, scenesButton { "Scenes" },
         lockButton { "Lock" };
     juce::TextButton busModeButton { "Bus" }, advancedModeButton { "Advanced" };
