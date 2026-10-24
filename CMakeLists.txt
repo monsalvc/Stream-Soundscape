@@ -57,11 +57,8 @@ target_sources(StreamRack PRIVATE
     ${ENGINE_SOURCES}
     Source/Main.cpp
     Source/UI/MainComponent.cpp
-    Source/UI/StripComponent.cpp
     Source/UI/BusPanel.cpp
     Source/UI/ConsolePanel.cpp
-    Source/UI/DetailPanel.cpp
-    Source/UI/EqCurve.cpp
     Source/UI/MasterPanel.cpp
     Source/UI/PluginUi.cpp)
 

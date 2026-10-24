@@ -779,6 +779,24 @@ void testWingClient()
     });
     check (retargeted, "wing client: switching the stream bus re-reads sends", client.getState().sources[0].sendLevel);
 
+    // Stream-only changes reach the console; the channel's own fader and mute are left alone.
+    client.setSendLevel (0, -12.5f);
+    client.setSendOn (0, false);
+    client.setTargetFader (-4.0f);
+    client.setTargetMute (true);
+    const bool changed = waitFor ([&]
+    {
+        return std::abs (console.getFloat ("/ch/1/send/3/lvl") + 12.5f) < 0.01f && console.getInt ("/ch/1/send/3/on") == 0
+               && std::abs (console.getFloat ("/bus/3/fdr") + 4.0f) < 0.01f && console.getInt ("/bus/3/mute") == 1;
+    }, 2000);
+    check (changed, "wing client: send level/on and stream bus fader/mute reach the console", console.getFloat ("/ch/1/send/3/lvl"));
+    check (console.getInt ("/ch/1/mute") == 1 && std::abs (console.getFloat ("/ch/1/fdr")) < 0.01f
+               && std::abs (console.getFloat ("/ch/1/send/14/lvl") + 2.0f) < 0.01f,
+           "wing client: channel fader, mute and other sends untouched", 0);
+    juce::Thread::sleep (300);
+    const auto after = client.getState();
+    check (std::abs (after.sources[0].sendLevel + 12.5f) < 0.01f && after.targetMix().mute, "wing client: state agrees after the echo", after.sources[0].sendLevel);
+
     // Discovery finds the simulated console.
     const auto found = WingClient::discover (800, console.getPorts().discovery, "127.0.0.1");
     check (found.size() == 1 && found[0].name == "StreamRack demo", "wing: discovery finds the console", (double) found.size());

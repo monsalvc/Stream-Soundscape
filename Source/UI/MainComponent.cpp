@@ -12,37 +12,10 @@ namespace
     {
         return juce::SHA256 (("streamrack:" + pin).toUTF8()).toHexString();
     }
-
-    // A separate window, so it can be stacked next to Wirecast and StreamRack.
-    class ConsoleWindow : public juce::DocumentWindow
-    {
-    public:
-        ConsoleWindow (ConsolePanel* panel, juce::PropertiesFile& s)
-            : DocumentWindow ("StreamRack - Console", colours::background, DocumentWindow::allButtons), settings (s)
-        {
-            setUsingNativeTitleBar (true);
-            setContentOwned (panel, false);
-            setResizable (true, false);
-            setResizeLimits (420, 300, 10000, 10000);
-            if (! restoreWindowStateFromString (settings.getValue ("consoleWindow")))
-                centreWithSize (900, 520);
-        }
-
-        ~ConsoleWindow() override { settings.setValue ("consoleWindow", getWindowStateAsString()); }
-
-        void closeButtonPressed() override
-        {
-            settings.setValue ("consoleWindow", getWindowStateAsString());
-            setVisible (false);
-        }
-
-    private:
-        juce::PropertiesFile& settings;
-    };
 } // namespace
 
 MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, juce::PropertiesFile& s)
-    : rack (r), deviceManager (dm), settings (s), detail (r, pluginWindows), busPanel (r), master (r, pluginWindows)
+    : rack (r), deviceManager (dm), settings (s), busPanel (r), master (r, pluginWindows), consolePanel (wingClient, settings)
 {
     juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel); // dialogs and plugin windows too
     setLookAndFeel (&lookAndFeel);
@@ -56,9 +29,6 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
     status.setFont (juce::FontOptions (12.0f));
     addAndMakeVisible (status);
 
-    consoleButton.setTooltip ("Watch the WING channels feeding the stream bus (names, sends, mutes, meters)");
-    consoleButton.onClick = [this] { showConsole(); };
-    addAndMakeVisible (consoleButton);
     audioButton.onClick = [this] { showAudioSettings(); };
     pluginsButton.onClick = [this] { showPluginScanner(); };
     scenesButton.onClick = [this] { showScenesMenu(); };
@@ -67,42 +37,35 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
         addAndMakeVisible (b);
 
     // Mode switch: Bus (the stereo stream bus) or Advanced (individual channels).
-    busModeButton.setTooltip ("Bus mode: color the console's stereo stream bus");
-    advancedModeButton.setTooltip ("Advanced mode: mix and color individual channels");
-    for (auto* b : { &busModeButton, &advancedModeButton })
+    // Two views: Bus (color the stream bus coming in over Dante) and WING Mix (the console
+    // channels feeding that bus, read and adjusted over the network).
+    busViewButton.setTooltip ("Color the stream bus coming in over Dante");
+    wingViewButton.setTooltip ("The WING channels feeding the stream bus: who's talking, sends, mutes");
+    for (auto* b : { &busViewButton, &wingViewButton })
     {
         b->setClickingTogglesState (true);
         b->setRadioGroupId (1001);
-        b->setConnectedEdges (b == &busModeButton ? juce::Button::ConnectedOnRight : juce::Button::ConnectedOnLeft);
+        b->setConnectedEdges (b == &busViewButton ? juce::Button::ConnectedOnRight : juce::Button::ConnectedOnLeft);
         addAndMakeVisible (b);
     }
-    busModeButton.onClick = [this] { requestMode (true); };
-    advancedModeButton.onClick = [this] { requestMode (false); };
-
-    for (int i = 0; i < numStrips; ++i)
-        stripContainer.addAndMakeVisible (strips.add (new StripComponent (rack, i, [this] (int idx) { selectStrip (idx); })));
-
-    stripViewport.setViewedComponent (&stripContainer, false);
-    stripViewport.setScrollBarsShown (true, true); // vertical only appears if the window is very short
-    addAndMakeVisible (stripViewport);
-
-    detailViewport.setViewedComponent (&detail, false);
-    detailViewport.setScrollBarsShown (false, true);
-    addChildComponent (detailViewport);
-    detail.setCurveShown (settings.getBoolValue ("eqCurve", false));
-    detail.onLayoutChanged = [this]
+    busViewButton.onClick = [this] { setView (false); };
+    wingViewButton.onClick = [this]
     {
-        settings.setValue ("eqCurve", detail.isCurveShown());
-        resized();
+        setView (true);
+        if (! wingClient.isActive() && ! locked)
+            showConnectDialog();
     };
 
     addChildComponent (busPanel);
     addAndMakeVisible (master);
+    consolePanel.onConnectClicked = [this] { showConnectDialog(); };
+    addChildComponent (consolePanel);
 
     rack.onSlotAboutToChange = [this] (PluginSlot& slot) { pluginWindows.close (slot); };
     rack.state.state.addListener (this);
 
-    setBusMode (rack.state.getRawParameterValue (masterId ("busMode"))->load() > 0.5f);
+    master.setBusMode (true);
+    setView (settings.getBoolValue ("wingView", false));
     setLocked (settings.getBoolValue ("locked", false));
     updateStatus();
     startTimerHz (30);
@@ -116,7 +79,6 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
 MainComponent::~MainComponent()
 {
     stopTimer();
-    consoleWindow.reset();
     wingClient.disconnect();
     demoConsole.reset();
     rack.state.state.removeListener (this);
@@ -160,13 +122,13 @@ void MainComponent::resized()
     title.setVisible (! narrowBar);
     if (! narrowBar)
         title.setBounds (bar.removeFromLeft (114));
-    if (busModeButton.isVisible())
+    if (busViewButton.isVisible())
     {
-        busModeButton.setBounds (bar.removeFromLeft (narrowBar ? 56 : 70));
-        advancedModeButton.setBounds (bar.removeFromLeft (narrowBar ? 78 : 90));
+        busViewButton.setBounds (bar.removeFromLeft (narrowBar ? 50 : 64));
+        wingViewButton.setBounds (bar.removeFromLeft (narrowBar ? 78 : 92));
         bar.removeFromLeft (12);
     }
-    for (auto* b : { &lockButton, &scenesButton, &pluginsButton, &audioButton, &consoleButton })
+    for (auto* b : { &lockButton, &scenesButton, &pluginsButton, &audioButton })
     {
         if (b->isVisible())
         {
@@ -184,47 +146,20 @@ void MainComponent::resized()
     else
         master.setBounds (r.removeFromRight (MasterPanel::preferredWidth));
 
-    if (busMode)
-    {
-        busPanel.setBounds (r);
-        return;
-    }
-
-    const bool showDetail = ! locked && ! busMode && selected >= 0;
-    detailViewport.setVisible (showDetail);
-    if (showDetail)
-    {
-        detailViewport.setBounds (r.removeFromBottom (juce::jmin (detail.getPreferredHeight() + 8, r.getHeight() / 2)));
-        detail.setSize (juce::jmax (detailViewport.getWidth(), detail.getPreferredWidth()), detail.getPreferredHeight());
-    }
-
-    stripViewport.setBounds (r);
-    const int contentWidth = numStrips * StripComponent::preferredWidth;
-    const int scrollBar = r.getWidth() < contentWidth ? stripViewport.getScrollBarThickness() : 0;
-    stripContainer.setSize (contentWidth, juce::jmax (StripComponent::minimumHeight, r.getHeight() - scrollBar));
-    for (int i = 0; i < strips.size(); ++i)
-        strips[i]->setBounds (i * StripComponent::preferredWidth, 4, StripComponent::preferredWidth,
-                              stripContainer.getHeight() - 8);
+    busPanel.setBounds (r);
+    consolePanel.setBounds (r);
 }
 
 //==============================================================================
 void MainComponent::timerCallback()
 {
-    // The mode is a parameter, so a scene recall can change it; follow it here.
-    const bool paramBusMode = rack.state.getRawParameterValue (masterId ("busMode"))->load() > 0.5f;
-    if (paramBusMode != busMode)
-        setBusMode (paramBusMode);
+    // The engine always processes the stream bus. Scenes saved with the old Advanced mode
+    // would switch it to channel strips, so switch it back.
+    if (rack.state.getRawParameterValue (masterId ("busMode"))->load() < 0.5f)
+        rack.state.getParameter (masterId ("busMode"))->setValueNotifyingHost (1.0f);
 
-    if (busMode)
-    {
+    if (! wingView)
         busPanel.tick();
-    }
-    else
-    {
-        for (auto* s : strips)
-            s->tick();
-        detail.tick();
-    }
     master.tick();
 
     if (--statusCountdown <= 0)
@@ -262,37 +197,17 @@ void MainComponent::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
 
 void MainComponent::refreshAll()
 {
-    for (auto* s : strips)
-        s->refreshName();
-    detail.refresh();
     master.refresh();
 }
 
-void MainComponent::selectStrip (int index)
+void MainComponent::setView (bool wingMix)
 {
-    selected = (index == selected) ? -1 : index;
-    for (auto* s : strips)
-        s->setSelected (s == strips[selected]);
-    if (selected >= 0)
-        detail.setStrip (selected);
-    resized();
-}
-
-void MainComponent::requestMode (bool shouldBeBusMode)
-{
-    auto* p = rack.state.getParameter (masterId ("busMode"));
-    p->setValueNotifyingHost (shouldBeBusMode ? 1.0f : 0.0f);
-    setBusMode (shouldBeBusMode);
-}
-
-void MainComponent::setBusMode (bool shouldBeBusMode)
-{
-    busMode = shouldBeBusMode;
-    busModeButton.setToggleState (busMode, juce::dontSendNotification);
-    advancedModeButton.setToggleState (! busMode, juce::dontSendNotification);
-    busPanel.setVisible (busMode);
-    stripViewport.setVisible (! busMode);
-    master.setBusMode (busMode);
+    wingView = wingMix;
+    settings.setValue ("wingView", wingView);
+    busViewButton.setToggleState (! wingView, juce::dontSendNotification);
+    wingViewButton.setToggleState (wingView, juce::dontSendNotification);
+    busPanel.setVisible (! wingView);
+    consolePanel.setVisible (wingView);
     resized();
     repaint();
 }
@@ -303,21 +218,12 @@ void MainComponent::setLocked (bool shouldLock)
     settings.setValue ("locked", locked);
 
     if (locked)
-    {
         pluginWindows.closeAll();
-        selected = -1;
-        for (auto* s : strips)
-            s->setSelected (false);
-    }
 
-    for (auto* s : strips)
-        s->setLocked (locked);
+    // Volunteers can still switch views; both are view-only when locked.
     master.setLocked (locked);
     busPanel.setLocked (locked);
-    if (consolePanel != nullptr)
-        consolePanel->setLocked (locked);
-    busModeButton.setVisible (! locked);
-    advancedModeButton.setVisible (! locked);
+    consolePanel.setLocked (locked);
 
     audioButton.setVisible (! locked);
     pluginsButton.setVisible (! locked);
@@ -327,22 +233,6 @@ void MainComponent::setLocked (bool shouldLock)
 }
 
 //==============================================================================
-void MainComponent::showConsole()
-{
-    if (consoleWindow == nullptr)
-    {
-        consolePanel = new ConsolePanel (wingClient, settings);
-        consolePanel->setLocked (locked);
-        consolePanel->onConnectClicked = [this] { showConnectDialog(); };
-        consoleWindow = std::make_unique<ConsoleWindow> (consolePanel, settings);
-    }
-    consoleWindow->setVisible (true);
-    consoleWindow->toFront (true);
-
-    if (! wingClient.isActive())
-        showConnectDialog();
-}
-
 void MainComponent::showConnectDialog()
 {
     const auto host = settings.getValue ("wingHost");
@@ -358,9 +248,7 @@ void MainComponent::showConnectDialog()
     options.escapeKeyTriggersCloseButton = true;
     options.useNativeTitleBar = true;
     options.resizable = false;
-    options.componentToCentreAround = consoleWindow != nullptr && consoleWindow->isVisible()
-                                          ? static_cast<juce::Component*> (consoleWindow.get())
-                                          : static_cast<juce::Component*> (this);
+    options.componentToCentreAround = this;
     options.launchAsync();
 }
 

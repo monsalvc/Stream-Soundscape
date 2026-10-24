@@ -4,54 +4,53 @@ A dedicated processor for the livestream mix. It takes audio from the Behringer 
 adds "color" (tone, glue, saturation, reverb, consistent loudness) with built-in processing and free
 VST3/AU plugins, and sends the finished stereo mix on to Wirecast. The house mix is never touched.
 
+StreamRack does two separate jobs, one per view:
+
 ```
-WING ─ Dante ─► "Color" Mac: Dante Virtual Soundcard
-                  StreamRack
-                    Bus mode:      stream bus (2 ch) → trim
-                    Advanced mode: up to 24 channels → EQ/dynamics/inserts → mix (+ reverb bus)
-                    then:          leveler → bus comp → 4 inserts → fader → limiter
-                  Dante Virtual Soundcard outputs 1-2
-             ─ Dante ─► Wirecast Mac (unchanged) ─► YouTube
+            ┌──────────── 1. WING MIX (network) ─────────────┐
+WING ─ Ethernet/Wi-Fi ─►  read names, sends, mutes, meters      │
+                          adjust stream sends (Edit sends)     │
+            └──────── sets the balance of the stream bus ─────┘
+                                    │
+WING ─ Dante (stream bus, 2 ch) ─► "Color" Mac (Dante Virtual Soundcard)
+            ┌──────────── 2. BUS (audio) ────────────────────┐
+            │ trim → leveler → bus comp → 4 inserts → fader → │
+            │ limiter → loudness meter                       │
+            └─────────────────────────────────────────────────┘
+                 Dante Virtual Soundcard outputs 1-2
+            ─ Dante ─► Wirecast Mac (unchanged) ─► YouTube
 ```
 
-## Two modes
+## Two views
 
-Switch with the **Bus | Advanced** buttons at the top left. The mode is saved with each scene.
+Switch with the **Bus | WING Mix** buttons at the top left. The engine always processes the stream
+bus; the views only change what you see. The color controls (leveler, compressor, inserts, limiter
+and loudness) stay on screen in both.
 
-- **Bus mode (default):** the console's stereo stream bus comes in on one Dante pair and goes through
-  the master chain. Balance stays on the console; StreamRack adds the color and keeps the level steady.
-  The screen shows the incoming level, what the leveler is doing, and the signal flow.
-- **Advanced mode:** individual channels come in over Dante and StreamRack mixes them itself, with full
-  processing per channel (see below). Use it when you want a different balance or stream-only
-  processing for each source.
+- **Bus:** the stream bus coming in over Dante: pick its Dante pair, trim it, watch the leveler and
+  the signal flow. This is the audio StreamRack colors and sends to Wirecast.
+- **WING Mix:** the WING channels that feed the stream bus, read from the console over the network
+  and shown as a condensed fader bank (see "Watching and adjusting the WING mix" below).
 
 ## What it does
 
-- **Automatic leveler** (both modes): slowly turns the stream up or down toward a loudness target
-  (default -16 LUFS, within +/-9 dB) so the stream stays even from worship to sermon to announcements,
-  and when FOH rides a post-fader bus. It holds its gain through pauses instead of pumping up room noise.
+- **Automatic leveler:** slowly turns the stream up or down toward a loudness target (default
+  -16 LUFS, within +/-9 dB) so the stream stays even from worship to sermon to announcements, and
+  when FOH rides a post-fader bus. It holds its gain through pauses instead of pumping up room noise.
 - **Master chain:** leveler, glue compressor, **four VST3/AU insert slots in order**, master fader and a
   look-ahead brickwall limiter (default ceiling -1 dBFS).
 - **Loudness meter** (ITU-R BS.1770 / EBU R128): momentary, short-term and integrated loudness
   against the -14 LUFS YouTube target. Green means on target, amber means quiet, red means hot.
-- **Advanced mode channels:** 24 strips fed from any of 64 Dante inputs, mono or stereo, each with
-  trim, 24 dB/oct high-pass, pitch correction, gate, 4-band EQ, compressor, two plugin inserts, pan, fader and a send to a
-  shared reverb bus (built-in reverb, or a plugin in the reverb bus slot). Plugin latency is compensated
-  between channels so inserts don't cause phasing.
-- **Vocal pitch correction (Advanced mode):** press **TUNE** in a channel's PITCH section to gently pull
-  a singer toward the nearest note, for the stream only (the room still hears the live voice).
-  **Amount** sets how far (50-80% sounds natural; 100% is fully in tune) and **Speed** how quickly
-  (slower keeps slides and vibrato). The header shows the note being sung and how far off it is.
-  It works on one voice per channel, so use it on lead and solo vocal mics, not on choir or band channels.
-  It adds about 28 ms of delay, and the other channels are delayed to match automatically.
-- **EQ curve view:** press **CURVE** in a channel's EQ section to swap the knobs for a frequency-response
-  graph of its high-pass and EQ. Drag a point to set frequency and gain, scroll over a mid band to change
-  its Q, double-click a point to reset its gain. The choice is remembered.
-- **Scenes:** save and recall full snapshots (mode, names, settings and plugins), for example
-  "Sabbath Worship" or "Sabbath School". They are stored in `~/Documents/StreamRack Scenes`.
-- **Lock mode for volunteers:** a PIN-protected view that shows only meters, loudness, faders, mutes
-  and scene recall. Lock mode survives a restart.
+- **WING Mix:** the console channels feeding the stream bus, with who is talking, what is muted, and
+  the stream sends, which can be adjusted from here without touching the house mix.
+- **Scenes:** save and recall full snapshots (settings and plugins), for example "Sabbath Worship" or
+  "Sabbath School". They are stored in `~/Documents/StreamRack Scenes`.
+- **Lock mode for volunteers:** a PIN-protected view that shows only meters, loudness, faders and
+  scene recall, and makes the WING Mix view look-only. Lock mode survives a restart.
 - Everything autosaves every 30 seconds and on quit, and comes back on the next launch.
+
+The engine still contains the earlier channel-strip mode (24 channels with EQ, dynamics and pitch
+correction); it isn't on screen now and can be brought back if needed.
 
 ## Recommended free plugins
 
@@ -93,10 +92,9 @@ set the plugin to 100% wet, and the channels' Reverb knobs control how much each
 
 ### 1. WING → Dante
 
-1. The **WING-DANTE** card sends the stream bus (Bus mode) or individual channels (Advanced mode).
-2. For Advanced mode, send each channel to a Dante output using a **tap point before the fader**
-   (post-EQ/dynamics if available) so FOH fader moves don't change the stream balance. For Bus mode,
-   ask whoever runs the bus whether its sends can be **pre-fader** for the same reason.
+1. The **WING-DANTE** card sends the stream bus to a Dante pair.
+2. Ask whoever runs the bus whether its sends can be **pre-fader**, so FOH fader moves don't change
+   the stream balance.
 3. Leave the WING card as the Dante clock leader at **48 kHz**.
 
 ### 2. The "color" Mac (runs StreamRack)
@@ -145,26 +143,30 @@ Click **Plugins... → Options... → Scan for new or updated VST3 plug-ins** (a
 runs inside the app; if a plugin crashes the scan, relaunch and scan again and that plugin will be
 skipped. Then click any **+ insert** button to load one.
 
-### 5. Watching the console (WING over the network)
+### 5. Watching and adjusting the WING mix (network)
 
-Click **Console** for a separate window that shows the WING channels feeding the stream bus, the way
-BoxCast RemoteMix does, as a condensed fader bank: each channel's scribble strip (name and colour
-from the console), its send to the stream bus drawn as a fader (with PRE/POST), its input meter, its
-channel fader and its mute, plus the stream bus as a master strip on the right. It only reads from the console; nothing in
-StreamRack changes the WING.
+Click **WING Mix** to see the WING channels feeding the stream bus, the way BoxCast RemoteMix does,
+as a condensed fader bank: each channel's scribble strip (name and colour from the console), its
+send to the stream bus drawn as a fader (with PRE/POST), its input meter, its channel fader, the
+send's **ON** button and the channel's **MUTE** light, plus the stream bus as a master strip on the
+right.
 
 - **Connect:** the color Mac must reach the WING's own **Ethernet port** (on the back of the console,
-  not the Dante card's ports). Click **Connect... → Search the network**, or type the WING's IP
-  address (on the WING: **Setup → Network**). macOS will ask whether StreamRack may find devices on
-  the local network: click **Allow** (it can be changed later in System Settings → Privacy &
-  Security → Local Network). StreamRack reconnects to the same console when it starts.
-- **Pick the stream bus** in the dropdown (it picks a bus named "STREAM" by itself). **All channels**
-  also shows named channels that aren't sent to it.
+  not the Dante card's ports), by cable or through a Wi-Fi router the WING is plugged into (not a
+  guest network). Click **Connect... → Search the network**, or type the WING's IP address (on the
+  WING: **Setup → Network**). macOS will ask whether StreamRack may find devices on the local
+  network: click **Allow** (it can be changed later in System Settings → Privacy & Security → Local
+  Network). StreamRack reconnects to the same console when it starts.
+- **Pick the stream bus** in the dropdown (it picks a bus named "STREAM" by itself). Named channels
+  are always shown; **All channels** adds the unnamed ones.
 - **What the strips mean:** a green outline (and green signal light) means the channel is live on
   the stream. An amber outline means someone is talking or playing on a channel the stream can't
-  hear: it's muted (**MUTE !**) or it's a post-fader send with the channel fader down. **OFF** under
-  the fader means the send is switched off. The master strip shows the stream bus fader, its stereo
-  meter and a red **MUTE** when the bus itself is muted.
+  hear: it's muted (**MUTE!**) or it's a post-fader send with the channel fader down. **OFF** under
+  the fader means the send is switched off.
+- **Edit sends:** off every time StreamRack starts. Turn it on to drag a send fader (double-click
+  for 0 dB), switch a send **ON**/off, or move and mute the stream bus on the master strip. These
+  only change the stream: the channel faders and mutes that the house hears stay on the console
+  (their lights are display-only). Lock mode turns editing off.
 - **Demo console:** a pretend WING on the same Mac (in the Connect dialog) for learning the screen
   away from the booth.
 
@@ -213,7 +215,7 @@ To use an existing JUCE checkout instead of downloading it, pass `-DSTREAMRACK_J
 | `Source/Engine/PluginSlot.*`, `PluginHost.*` | VST3/AU hosting |
 | `Source/Engine/Params.*` | Every parameter, its range and its default |
 | `Source/Console/*` | WING network protocol (OSC control, binary meters, discovery), the client, and a simulated WING |
-| `Source/UI/*` | Main window, Bus mode screen, strips, channel editor and EQ curve, master panel, console view, plugin windows |
+| `Source/UI/*` | Main window, Bus view, WING Mix view, master panel, plugin windows |
 | `Tests/EngineTests.cpp` | Headless tests: loudness against EBU reference signals, limiter ceiling, EQ, compressor, leveler, pitch correction accuracy/stability/latency, Bus mode and channel routing, state, and the full device path with simulated Dante/SoundGrid-style devices (channel counts, 44.1-96 kHz, 32-1024 sample buffers), and the WING client against the simulated console |
 
 ## Licensing
@@ -228,5 +230,5 @@ VST is a trademark of Steinberg Media Technologies GmbH.
 - Out-of-process plugin scanning so a bad plugin can't crash a scan
 - Per-channel presets ("Pastor lav", "Acoustic guitar")
 - Solo/PFL to the headphone output
-- Adjusting the stream bus sends from the Console window (BoxCast RemoteMix-style control)
+- Bringing back the channel-strip mode (EQ, dynamics and pitch correction per Dante channel)
 - Remote control from a tablet (OSC or a small web page)

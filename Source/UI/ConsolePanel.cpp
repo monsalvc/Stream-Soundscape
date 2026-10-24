@@ -57,7 +57,27 @@ namespace
         return 1.0f;
     }
 
-    // Fader track with a scale and a cap, like a console strip. Read-only.
+    float dbForPosition (float position)
+    {
+        if (position <= 0.0f)
+            return wing::minusInf;
+        float lo = -144.0f, hi = 10.0f;
+        for (int i = 0; i < 40; ++i) // the law is monotonic: bisect
+        {
+            const float mid = 0.5f * (lo + hi);
+            (faderPosition (mid) < position ? lo : hi) = mid;
+        }
+        return std::round (hi * 10.0f) / 10.0f;
+    }
+
+    // Dragging a fader: the new level for a drag of dy pixels on a fader drawn in this area.
+    float draggedDb (float startDb, int dy, juce::Rectangle<int> faderArea)
+    {
+        const float travel = juce::jmax (20.0f, (float) faderArea.getHeight() - 16.0f);
+        return dbForPosition (juce::jlimit (0.0f, 1.0f, faderPosition (startDb) - (float) dy / travel));
+    }
+
+    // Fader track with a scale and a cap, like a console strip.
     void drawFader (juce::Graphics& g, juce::Rectangle<int> area, float db, juce::Colour capLine, bool active, bool scale)
     {
         auto r = area.toFloat().reduced (0.0f, 8.0f); // room for half a cap at each end
@@ -155,9 +175,12 @@ void SourceTile::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
     g.drawText (source.sendMode.isNotEmpty() ? source.sendMode : juce::String ("SEND"), modeRow, juce::Justification::centredLeft);
 
-    // Bottom: send level readout, channel fader, mute.
-    auto mute = content.removeFromBottom (20);
-    drawButtonLight (g, mute, warning && source.mute ? "MUTE !" : "MUTE", source.mute, colours::red);
+    // Bottom: the send's ON button (the stream only) and the channel's mute light (the console's).
+    auto buttons = content.removeFromBottom (20);
+    onArea = buttons.removeFromLeft (buttons.getWidth() / 2 - 1);
+    buttons.removeFromLeft (2);
+    drawButtonLight (g, onArea, "ON", source.sendOn, colours::green.darker (0.5f));
+    drawButtonLight (g, buttons, warning && source.mute ? "MUTE!" : "MUTE", source.mute, colours::red);
     content.removeFromBottom (3);
     g.setColour (colours::dim);
     g.setFont (juce::FontOptions (9.5f));
@@ -171,7 +194,47 @@ void SourceTile::paint (juce::Graphics& g)
     auto meter = content.removeFromRight (6).reduced (0, 6);
     drawMeterBar (g, meter.toFloat(), meterDb, feeds);
     content.removeFromRight (2);
-    drawFader (g, content, source.sendOn ? source.sendLevel : wing::minusInf, colour, inMix, content.getHeight() > 90);
+    faderArea = content;
+    drawFader (g, content, source.sendLevel, colour, inMix, content.getHeight() > 90);
+}
+
+void SourceTile::setEditable (bool shouldEdit)
+{
+    editable = shouldEdit;
+    dragging = dragging && editable;
+}
+
+void SourceTile::mouseDown (const juce::MouseEvent& e)
+{
+    if (! editable)
+        return;
+    if (onArea.contains (e.getPosition()))
+    {
+        if (onSendOn)
+            onSendOn (! source.sendOn);
+    }
+    else if (faderArea.contains (e.getPosition()))
+    {
+        dragging = true;
+        dragStartDb = source.sendLevel;
+    }
+}
+
+void SourceTile::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragging && editable && onSendLevel)
+        onSendLevel (draggedDb (dragStartDb, e.getDistanceFromDragStartY(), faderArea));
+}
+
+void SourceTile::mouseUp (const juce::MouseEvent&)
+{
+    dragging = false;
+}
+
+void SourceTile::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (editable && faderArea.contains (e.getPosition()) && onSendLevel)
+        onSendLevel (0.0f);
 }
 
 //==============================================================================
@@ -211,8 +274,8 @@ void MixTile::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
     g.drawText (meters ? "BUS OUT" : "NO METERS", content.removeFromTop (16), juce::Justification::centredLeft);
 
-    auto mute = content.removeFromBottom (20);
-    drawButtonLight (g, mute, "MUTE", mix.mute, colours::red);
+    muteArea = content.removeFromBottom (20);
+    drawButtonLight (g, muteArea, "MUTE", mix.mute, colours::red);
     content.removeFromBottom (3 + 12);
     g.setColour (colours::text);
     g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
@@ -224,7 +287,47 @@ void MixTile::paint (juce::Graphics& g)
     meters2.removeFromLeft (3);
     drawMeterBar (g, meters2.toFloat(), meterR, ! mix.mute);
     content.removeFromRight (2);
+    faderArea = content;
     drawFader (g, content, mix.fader, colours::accent, ! mix.mute, content.getHeight() > 90);
+}
+
+void MixTile::setEditable (bool shouldEdit)
+{
+    editable = shouldEdit;
+    dragging = dragging && editable;
+}
+
+void MixTile::mouseDown (const juce::MouseEvent& e)
+{
+    if (! editable)
+        return;
+    if (muteArea.contains (e.getPosition()))
+    {
+        if (onMute)
+            onMute (! mix.mute);
+    }
+    else if (faderArea.contains (e.getPosition()))
+    {
+        dragging = true;
+        dragStartDb = mix.fader;
+    }
+}
+
+void MixTile::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragging && editable && onFader)
+        onFader (draggedDb (dragStartDb, e.getDistanceFromDragStartY(), faderArea));
+}
+
+void MixTile::mouseUp (const juce::MouseEvent&)
+{
+    dragging = false;
+}
+
+void MixTile::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (editable && faderArea.contains (e.getPosition()) && onFader)
+        onFader (0.0f);
 }
 
 //==============================================================================
@@ -241,7 +344,7 @@ ConsolePanel::ConsolePanel (wing::WingClient& c, juce::PropertiesFile& s) : clie
     targetBox.onChange = [this] { targetChosen(); };
     addAndMakeVisible (targetBox);
 
-    allToggle.setTooltip ("Show every named channel, not just the ones sent to the stream bus");
+    allToggle.setTooltip ("Also show unnamed channels");
     allToggle.setToggleState (settings.getBoolValue ("wingShowAll", false), juce::dontSendNotification);
     allToggle.onClick = [this]
     {
@@ -250,9 +353,22 @@ ConsolePanel::ConsolePanel (wing::WingClient& c, juce::PropertiesFile& s) : clie
     };
     addAndMakeVisible (allToggle);
 
+    // Changing the console from here is off until someone turns it on (every launch).
+    editToggle.setTooltip ("Allow moving the stream sends and the stream bus fader and mute from here. "
+                           "Channel faders and mutes stay on the console.");
+    editToggle.onClick = [this] { updateEditable(); };
+    addAndMakeVisible (editToggle);
+
+    mixTile.onFader = [this] (float db) { client.setTargetFader (db); };
+    mixTile.onMute = [this] (bool mute) { client.setTargetMute (mute); };
     addAndMakeVisible (mixTile);
     for (int i = 0; i < wing::numSources; ++i)
-        tileContainer.addChildComponent (tiles.add (new SourceTile()));
+    {
+        auto* tile = tiles.add (new SourceTile());
+        tile->onSendLevel = [this, i] (float db) { client.setSendLevel (i, db); };
+        tile->onSendOn = [this, i] (bool on) { client.setSendOn (i, on); };
+        tileContainer.addChildComponent (tile);
+    }
     shown.assign ((size_t) wing::numSources, false);
     viewport.setViewedComponent (&tileContainer, false);
     viewport.setScrollBarsShown (true, true);
@@ -273,6 +389,18 @@ void ConsolePanel::setLocked (bool shouldLock)
     locked = shouldLock;
     connectButton.setEnabled (! locked);
     targetBox.setEnabled (! locked);
+    editToggle.setEnabled (! locked);
+    if (locked)
+        editToggle.setToggleState (false, juce::dontSendNotification);
+    updateEditable();
+}
+
+void ConsolePanel::updateEditable()
+{
+    const bool edit = editToggle.getToggleState() && ! locked && state.status == wing::ConsoleState::Status::Connected;
+    for (auto* t : tiles)
+        t->setEditable (edit);
+    mixTile.setEditable (edit);
 }
 
 bool ConsolePanel::showsSource (int i) const
@@ -280,9 +408,9 @@ bool ConsolePanel::showsSource (int i) const
     const auto& s = state.sources[(size_t) i];
     if (! s.known)
         return false;
-    if (allToggle.getToggleState())
-        return s.name.isNotEmpty() || (s.sendOn && s.sendLevel > -90.0f);
-    return s.sendOn && s.sendLevel > -90.0f;
+    // Named channels always (so a send switched off here can be switched back on), plus anything
+    // sent to the stream; All channels adds the unnamed rest.
+    return allToggle.getToggleState() || s.name.isNotEmpty() || (s.sendOn && s.sendLevel > -90.0f);
 }
 
 void ConsolePanel::refreshTargets()
@@ -347,7 +475,10 @@ void ConsolePanel::timerCallback()
             tiles[i]->update (state.sources[(size_t) i], i);
     }
     if (changed || state.status != lastStatus)
+    {
         resized();
+        updateEditable();
+    }
     lastStatus = state.status;
 
     mixTile.update (state.targetMix(), state.target, state.metersFlowing);
@@ -401,8 +532,8 @@ void ConsolePanel::paint (juce::Graphics& g)
     juce::String hint;
     if (state.status == Status::Off)
         hint = "Click Connect... to find the WING on the network. The console and this Mac need to be on the same "
-               "network (an Ethernet cable to the WING or its switch). StreamRack only watches the console; it "
-               "never changes it.";
+               "network (the WING's Ethernet port, by cable or through a Wi-Fi router). StreamRack only changes "
+               "the stream sends, and only after you turn on Edit sends.";
     else if (state.status == Status::NoReply)
         hint = "Check the network cable and the WING's IP address (on the WING: Setup > Network). If macOS asked "
                "whether StreamRack may find devices on your local network, it needs Allow (System Settings > "
@@ -411,7 +542,7 @@ void ConsolePanel::paint (juce::Graphics& g)
     {
         const bool any = std::any_of (shown.begin(), shown.end(), [] (bool b) { return b; });
         if (! any)
-            hint = "No channels are sent to " + state.target.label()
+            hint = "No named channels and nothing sent to " + state.target.label()
                    + " yet. Pick the bus that feeds the stream above, or turn on All channels.";
     }
     if (hint.isNotEmpty())
@@ -437,6 +568,8 @@ void ConsolePanel::resized()
         r.removeFromTop (6);
         header = r.removeFromTop (28);
     }
+    editToggle.setBounds (header.removeFromRight (96));
+    header.removeFromRight (6);
     allToggle.setBounds (header.removeFromRight (110));
     header.removeFromRight (6);
     targetBox.setBounds (header.removeFromRight (juce::jmin (220, header.getWidth() / 2)));

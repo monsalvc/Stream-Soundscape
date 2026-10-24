@@ -46,6 +46,7 @@ void WingClient::connect (const juce::String& newHost, Ports newPorts)
     disconnect();
     {
         const juce::ScopedLock sl (lock);
+        outbox.clear();
         host = newHost.trim();
         ports = newPorts;
         const auto target = state.target;
@@ -80,6 +81,56 @@ ConsoleState WingClient::getState() const
 {
     const juce::ScopedLock sl (lock);
     return state;
+}
+
+void WingClient::queueChange (const juce::String& address, osc::Arg value)
+{
+    // Called with the lock held. A newer value for the same address replaces one not yet sent.
+    for (auto& m : outbox)
+        if (m.address == address)
+        {
+            m.args = { value };
+            return;
+        }
+    outbox.push_back ({ address, { value } });
+}
+
+void WingClient::setSendLevel (int source, float db)
+{
+    const juce::ScopedLock sl (lock);
+    if (state.status == ConsoleState::Status::Off || source < 0 || source >= numSources)
+        return;
+    db = juce::jlimit (minusInf, 10.0f, db);
+    state.sources[(size_t) source].sendLevel = db;
+    queueChange (sourcePath (source) + "/" + state.target.sendNode() + "/lvl", osc::Arg::ofFloat (db));
+}
+
+void WingClient::setSendOn (int source, bool on)
+{
+    const juce::ScopedLock sl (lock);
+    if (state.status == ConsoleState::Status::Off || source < 0 || source >= numSources)
+        return;
+    state.sources[(size_t) source].sendOn = on;
+    queueChange (sourcePath (source) + "/" + state.target.sendNode() + "/on", osc::Arg::ofInt (on ? 1 : 0));
+}
+
+void WingClient::setTargetFader (float db)
+{
+    const juce::ScopedLock sl (lock);
+    if (state.status == ConsoleState::Status::Off)
+        return;
+    db = juce::jlimit (minusInf, 10.0f, db);
+    state.targetMix().fader = db;
+    queueChange (state.target.path() + "/fdr", osc::Arg::ofFloat (db));
+}
+
+void WingClient::setTargetMute (bool mute)
+{
+    const juce::ScopedLock sl (lock);
+    if (state.status == ConsoleState::Status::Off)
+        return;
+    state.targetMix().mute = mute;
+    queueChange (state.target.path() + "/mute", osc::Arg::ofInt (mute ? 1 : 0));
 }
 
 void WingClient::run()
@@ -142,6 +193,15 @@ void WingClient::run()
             queue (sourceAddresses (target));
             lastRefresh = now;
         }
+
+        // Changes made in StreamRack go out first.
+        std::vector<osc::Message> changes;
+        {
+            const juce::ScopedLock sl (lock);
+            changes.swap (outbox);
+        }
+        for (const auto& m : changes)
+            send (control, host, ports.osc, m);
 
         // Pace the requests so the console's receive buffer isn't flooded.
         for (int n = 0; n < 8 && ! pending.empty(); ++n)

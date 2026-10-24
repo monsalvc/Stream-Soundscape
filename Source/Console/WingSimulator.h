@@ -29,6 +29,10 @@ public:
     // Input level of a source for the meters (only used when not animating).
     void setInputLevel (int source, float db);
 
+    // Current values, for checking what a client changed.
+    float getFloat (const juce::String& address) const;
+    int getInt (const juce::String& address) const;
+
     int getMeterFramesSent() const { return framesSent.load(); }
     bool hasSubscriber() const;
 

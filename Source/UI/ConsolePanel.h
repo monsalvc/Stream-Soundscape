@@ -6,38 +6,60 @@
 namespace sr::ui
 {
 // One console channel as a condensed fader strip: scribble strip, the send to the stream bus
-// drawn as a fader, the channel's input meter, and its mute.
+// drawn as a fader, the channel's input meter, the send's ON button and the channel's mute light.
+// When editing is allowed, the fader and ON button change the send (the stream only).
 class SourceTile : public juce::Component
 {
 public:
     static constexpr int width = 78, minHeight = 190;
 
     void update (const wing::SourceState&, int index);
+    void setEditable (bool);
     void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+
+    std::function<void (float db)> onSendLevel;
+    std::function<void (bool on)> onSendOn;
 
 private:
     wing::SourceState source;
     int index = 0;
     float meterDb = -100.0f;
+    bool editable = false, dragging = false;
+    float dragStartDb = 0.0f;
+    juce::Rectangle<int> faderArea, onArea;
 };
 
-// The stream bus itself as a master strip: its fader, stereo meter and mute.
+// The stream bus itself as a master strip: its fader, stereo meter and mute. When editing is
+// allowed, the fader and MUTE change the stream bus (which only the stream hears).
 class MixTile : public juce::Component
 {
 public:
     void update (const wing::MixState&, const wing::Target&, bool metersFlowing);
+    void setEditable (bool);
     void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+
+    std::function<void (float db)> onFader;
+    std::function<void (bool mute)> onMute;
 
 private:
     wing::MixState mix;
     wing::Target target;
-    bool meters = false;
-    float meterL = -100.0f, meterR = -100.0f;
+    bool meters = false, editable = false, dragging = false;
+    float meterL = -100.0f, meterR = -100.0f, dragStartDb = 0.0f;
+    juce::Rectangle<int> faderArea, muteArea;
 };
 
-// Live view of the console channels that feed the stream bus, read from the WING over the
-// network: who is talking, what is on the stream, and what is muted or turned down.
-// Read-only: nothing here changes the console.
+// The WING mix for the stream: the console channels that feed the stream bus, read from the
+// WING over the network (who is talking, what is on the stream, what is muted or turned down).
+// With Edit sends on, the sends and the stream bus fader and mute can be changed from here.
 class ConsolePanel : public juce::Component, private juce::Timer
 {
 public:
@@ -55,6 +77,7 @@ private:
     void refreshTargets();
     void targetChosen();
     void layoutTiles();
+    void updateEditable();
     juce::String statusText() const;
     bool showsSource (int index) const;
 
@@ -66,7 +89,7 @@ private:
 
     juce::TextButton connectButton { "Connect..." };
     juce::ComboBox targetBox;
-    Toggle allToggle { "All channels" };
+    Toggle allToggle { "All channels" }, editToggle { "Edit sends" };
     MixTile mixTile;
     juce::OwnedArray<SourceTile> tiles;
     juce::Component tileContainer;

@@ -158,6 +158,20 @@ void WingSimulator::setInputLevel (int source, float db)
     inputLevels[(size_t) source] = db;
 }
 
+float WingSimulator::getFloat (const juce::String& address) const
+{
+    const juce::ScopedLock sl (lock);
+    const auto it = params.find (address);
+    return it != params.end() ? it->second.f : 0.0f;
+}
+
+int WingSimulator::getInt (const juce::String& address) const
+{
+    const juce::ScopedLock sl (lock);
+    const auto it = params.find (address);
+    return it != params.end() ? it->second.i : 0;
+}
+
 bool WingSimulator::hasSubscriber() const
 {
     const juce::ScopedLock sl (lock);

@@ -112,6 +112,11 @@ struct ConsoleState
     {
         return target.kind == Target::Kind::Bus ? buses[(size_t) (target.index - 1)] : mains[(size_t) (target.index - 1)];
     }
+
+    MixState& targetMix()
+    {
+        return target.kind == Target::Kind::Bus ? buses[(size_t) (target.index - 1)] : mains[(size_t) (target.index - 1)];
+    }
 };
 
 //==============================================================================
