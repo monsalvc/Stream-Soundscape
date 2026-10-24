@@ -12,6 +12,33 @@ namespace
     {
         return juce::SHA256 (("streamrack:" + pin).toUTF8()).toHexString();
     }
+
+    // A separate window, so it can be stacked next to Wirecast and StreamRack.
+    class ConsoleWindow : public juce::DocumentWindow
+    {
+    public:
+        ConsoleWindow (ConsolePanel* panel, juce::PropertiesFile& s)
+            : DocumentWindow ("StreamRack - Console", colours::background, DocumentWindow::allButtons), settings (s)
+        {
+            setUsingNativeTitleBar (true);
+            setContentOwned (panel, false);
+            setResizable (true, false);
+            setResizeLimits (420, 300, 10000, 10000);
+            if (! restoreWindowStateFromString (settings.getValue ("consoleWindow")))
+                centreWithSize (900, 520);
+        }
+
+        ~ConsoleWindow() override { settings.setValue ("consoleWindow", getWindowStateAsString()); }
+
+        void closeButtonPressed() override
+        {
+            settings.setValue ("consoleWindow", getWindowStateAsString());
+            setVisible (false);
+        }
+
+    private:
+        juce::PropertiesFile& settings;
+    };
 } // namespace
 
 MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, juce::PropertiesFile& s)
@@ -29,6 +56,9 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
     status.setFont (juce::FontOptions (12.0f));
     addAndMakeVisible (status);
 
+    consoleButton.setTooltip ("Watch the WING channels feeding the stream bus (names, sends, mutes, meters)");
+    consoleButton.onClick = [this] { showConsole(); };
+    addAndMakeVisible (consoleButton);
     audioButton.onClick = [this] { showAudioSettings(); };
     pluginsButton.onClick = [this] { showPluginScanner(); };
     scenesButton.onClick = [this] { showScenesMenu(); };
@@ -77,11 +107,18 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
     updateStatus();
     startTimerHz (30);
     setSize (1440, 900);
+
+    // Reconnect to the console used last time.
+    if (const auto host = settings.getValue ("wingHost"); host.isNotEmpty())
+        connectConsole (host);
 }
 
 MainComponent::~MainComponent()
 {
     stopTimer();
+    consoleWindow.reset();
+    wingClient.disconnect();
+    demoConsole.reset();
     rack.state.state.removeListener (this);
     rack.onSlotAboutToChange = nullptr;
     pluginWindows.closeAll();
@@ -129,15 +166,16 @@ void MainComponent::resized()
         advancedModeButton.setBounds (bar.removeFromLeft (narrowBar ? 78 : 90));
         bar.removeFromLeft (12);
     }
-    for (auto* b : { &lockButton, &scenesButton, &pluginsButton, &audioButton })
+    for (auto* b : { &lockButton, &scenesButton, &pluginsButton, &audioButton, &consoleButton })
     {
         if (b->isVisible())
         {
-            const int w = b == &lockButton ? (narrowBar ? 64 : 80) : (narrowBar ? 74 : 96);
+            const int w = b == &lockButton ? (narrowBar ? 56 : 80) : (narrowBar ? 66 : 96);
             b->setBounds (bar.removeFromRight (w));
             bar.removeFromRight (narrowBar ? 4 : 6);
         }
     }
+    status.setVisible (bar.getWidth() >= 80);
     status.setBounds (bar);
 
     master.setAlongBottom (masterAlongBottom);
@@ -276,6 +314,8 @@ void MainComponent::setLocked (bool shouldLock)
         s->setLocked (locked);
     master.setLocked (locked);
     busPanel.setLocked (locked);
+    if (consolePanel != nullptr)
+        consolePanel->setLocked (locked);
     busModeButton.setVisible (! locked);
     advancedModeButton.setVisible (! locked);
 
@@ -284,6 +324,67 @@ void MainComponent::setLocked (bool shouldLock)
     lockButton.setButtonText (locked ? "Unlock" : "Lock");
     resized();
     repaint();
+}
+
+//==============================================================================
+void MainComponent::showConsole()
+{
+    if (consoleWindow == nullptr)
+    {
+        consolePanel = new ConsolePanel (wingClient, settings);
+        consolePanel->setLocked (locked);
+        consolePanel->onConnectClicked = [this] { showConnectDialog(); };
+        consoleWindow = std::make_unique<ConsoleWindow> (consolePanel, settings);
+    }
+    consoleWindow->setVisible (true);
+    consoleWindow->toFront (true);
+
+    if (! wingClient.isActive())
+        showConnectDialog();
+}
+
+void MainComponent::showConnectDialog()
+{
+    const auto host = settings.getValue ("wingHost");
+    auto* panel = new ConnectPanel (host, wingClient.isActive());
+    panel->onConnect = [this] (juce::String h) { connectConsole (h); };
+    panel->onDemo = [this] { connectConsole ("demo"); };
+    panel->onDisconnect = [this] { disconnectConsole(); };
+
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (panel);
+    options.dialogTitle = "Connect to the console";
+    options.dialogBackgroundColour = colours::panel;
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    options.componentToCentreAround = consoleWindow != nullptr && consoleWindow->isVisible()
+                                          ? static_cast<juce::Component*> (consoleWindow.get())
+                                          : static_cast<juce::Component*> (this);
+    options.launchAsync();
+}
+
+void MainComponent::connectConsole (const juce::String& host)
+{
+    settings.setValue ("wingHost", host);
+    if (host == "demo")
+    {
+        // A pretend WING on this computer.
+        wingClient.disconnect();
+        demoConsole = std::make_unique<wing::WingSimulator> (true);
+        if (demoConsole->start())
+            wingClient.connect ("127.0.0.1", demoConsole->getPorts());
+        return;
+    }
+    demoConsole.reset();
+    wingClient.connect (host);
+}
+
+void MainComponent::disconnectConsole()
+{
+    settings.setValue ("wingHost", juce::String());
+    wingClient.disconnect();
+    demoConsole.reset();
 }
 
 //==============================================================================

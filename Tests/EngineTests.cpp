@@ -5,6 +5,7 @@
 #include "Engine/Leveler.h"
 #include "Engine/PitchCorrector.h"
 #include "Engine/RackProcessor.h"
+#include "Console/WingSimulator.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <cstdio>
 
@@ -654,6 +655,145 @@ void testNetworkDevices()
         check (maxOut < 1e-6f, "device: bus pair beyond the device's inputs is silent", maxOut);
     }
 }
+
+//==============================================================================
+// WING console monitoring: protocol pieces, then the client against the simulated console.
+void testWingProtocol()
+{
+    using namespace sr;
+
+    // OSC round trip.
+    osc::Message m { "/ch/12/send/3/lvl", { osc::Arg::ofString ("-6.0"), osc::Arg::ofFloat (0.5f), osc::Arg::ofFloat (-6.0f) } };
+    const auto bytes = osc::encode (m);
+    osc::Message back;
+    const bool ok = osc::decode (bytes.getData(), bytes.getSize(), back);
+    check (ok && back.address == m.address && back.args.size() == 3 && juce::exactlyEqual (back.args[2].f, -6.0f),
+           "wing: OSC message round trip", (double) bytes.getSize());
+    check (bytes.getSize() % 4 == 0, "wing: OSC message padded to 4 bytes", (double) bytes.getSize());
+
+    // Discovery reply.
+    const auto d = wing::parseDiscoveryReply ("WING,192.168.1.62,FOH WING,ngc-full,S1234,3.1.0");
+    check (d && d->ip == "192.168.1.62" && d->name == "FOH WING" && d->firmware == "3.1.0", "wing: discovery reply parsed", 0);
+    check (! wing::parseDiscoveryReply ("X32,1.2.3.4"), "wing: other replies ignored", 0);
+
+    // Values, shadow addresses and the stream target.
+    wing::ConsoleState st;
+    st.target = { wing::Target::Kind::Bus, 14 };
+    wing::apply (st, { "/ch/1/name", { osc::Arg::ofString ("Pastor") } });
+    wing::apply (st, { "/ch/1/$mute", { osc::Arg::ofString ("1"), osc::Arg::ofFloat (1.0f), osc::Arg::ofInt (1) } });
+    wing::apply (st, { "/ch/1/col", { osc::Arg::ofString ("10"), osc::Arg::ofFloat (0.5f), osc::Arg::ofInt (9) } });
+    wing::apply (st, { "/ch/1/send/14/lvl", { osc::Arg::ofString ("-3.0"), osc::Arg::ofFloat (0.6f), osc::Arg::ofFloat (-3.0f) } });
+    wing::apply (st, { "/ch/1/send/2/lvl", { osc::Arg::ofString ("5.0"), osc::Arg::ofFloat (0.9f), osc::Arg::ofFloat (5.0f) } });
+    wing::apply (st, { "/aux/2/fdr", { osc::Arg::ofString ("-oo"), osc::Arg::ofFloat (0.0f), osc::Arg::ofFloat (-144.0f) } });
+    wing::apply (st, { "/bus/14/name", { osc::Arg::ofString ("STREAM") } });
+    const auto& s0 = st.sources[0];
+    check (s0.name == "Pastor" && s0.mute && s0.colour == 10, "wing: name, mute ($ address) and colour applied", s0.colour);
+    check (juce::exactlyEqual (s0.sendLevel, -3.0f), "wing: only the stream bus send is tracked", s0.sendLevel);
+    check (st.sources[wing::numChannels + 1].fader <= -144.0f && st.buses[13].name == "STREAM", "wing: aux and bus values applied", 0);
+
+    // Meter setup: a report id containing the escape byte must be escaped.
+    const auto setup = wing::meter::setup (50000, 0x11df2233u);
+    std::vector<uint8_t> payload;
+    wing::meter::Demux demux;
+    demux.feed (static_cast<const uint8_t*> (setup.getData()), setup.getSize(), [&] (int ch, uint8_t b) { if (ch == 3) payload.push_back (b); });
+    const bool idOk = payload.size() > 8 && payload[3] == 0xd4 && payload[4] == 0x11 && payload[5] == 0xdf && payload[6] == 0x22;
+    check (idOk, "wing: meter setup escapes 0xdf and selects channel 3", (double) payload.size());
+    const size_t expected = 3 + 5 + 1 + 2 * (size_t) wing::meter::numGroups + 1;
+    check (payload.size() == expected, "wing: meter setup asks for every channel, aux, bus, main", (double) payload.size());
+}
+
+template <typename Fn>
+bool waitFor (Fn&& condition, int timeoutMs = 4000)
+{
+    const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) timeoutMs;
+    while (juce::Time::getMillisecondCounter() < end)
+    {
+        if (condition())
+            return true;
+        juce::Thread::sleep (20);
+    }
+    return condition();
+}
+
+void testWingClient()
+{
+    using namespace sr::wing;
+
+    WingSimulator console (false);
+    if (! console.start())
+    {
+        check (false, "wing: simulator started", 0);
+        return;
+    }
+    console.setText ("/ch/1/name", "Pastor");
+    console.setInt ("/ch/1/send/14/on", 1);
+    console.setFloat ("/ch/1/send/14/lvl", -2.0f);
+    console.setText ("/ch/1/send/14/mode", "PRE");
+    console.setText ("/bus/14/name", "STREAM");
+    console.setInputLevel (0, -18.0f);
+
+    WingClient client;
+    client.setTarget ({ Target::Kind::Bus, 14 });
+    client.connect ("127.0.0.1", console.getPorts());
+
+    const bool connected = waitFor ([&] { return client.getState().status == ConsoleState::Status::Connected; });
+    check (connected, "wing client: connects to the console", 0);
+    check (waitFor ([&] { return client.getState().consoleName == "StreamRack demo"; }), "wing client: reads the console's name", 0);
+
+    const bool loaded = waitFor ([&]
+    {
+        const auto s = client.getState();
+        return s.sources[0].name == "Pastor" && s.sources[0].sendOn && s.sources[0].sendMode == "PRE" && s.buses[13].name == "STREAM";
+    });
+    check (loaded, "wing client: names and stream sends loaded", 0);
+
+    const bool metered = waitFor ([&]
+    {
+        const auto s = client.getState();
+        return s.metersFlowing && std::abs (s.sources[0].inputDb() + 18.0f) < 0.01f;
+    });
+    check (metered, "wing client: meters stream in (-18 dB on Pastor)", client.getState().sources[0].inputDb());
+
+    // Someone mutes the pastor on the console: the change is pushed, not polled.
+    console.setInt ("/ch/1/mute", 1);
+    const bool pushed = waitFor ([&] { return client.getState().sources[0].mute; }, 1500);
+    check (pushed, "wing client: console changes arrive within 1.5 s", 0);
+    check (! client.getState().sources[0].feedsTarget(), "wing client: a muted source doesn't feed the stream", 0);
+
+    // Meters keep flowing past the console's 5 s meter timeout (keepalive works).
+    juce::Thread::sleep (6000);
+    const int before = console.getMeterFramesSent();
+    juce::Thread::sleep (500);
+    check (console.getMeterFramesSent() > before && client.getState().metersFlowing, "wing client: meters still flowing after 6 s",
+           console.getMeterFramesSent() - before);
+    check (console.hasSubscriber(), "wing client: change subscription kept alive", 0);
+
+    // Watching a different bus re-reads the sends.
+    console.setInt ("/ch/1/send/3/on", 1);
+    console.setFloat ("/ch/1/send/3/lvl", -9.0f);
+    client.setTarget ({ Target::Kind::Bus, 3 });
+    const bool retargeted = waitFor ([&]
+    {
+        const auto s = client.getState();
+        return std::abs (s.sources[0].sendLevel + 9.0f) < 0.01f && s.sources[0].sendMode == "POST";
+    });
+    check (retargeted, "wing client: switching the stream bus re-reads sends", client.getState().sources[0].sendLevel);
+
+    // Discovery finds the simulated console.
+    const auto found = WingClient::discover (800, console.getPorts().discovery, "127.0.0.1");
+    check (found.size() == 1 && found[0].name == "StreamRack demo", "wing: discovery finds the console", (double) found.size());
+
+    client.disconnect();
+    check (client.getState().status == ConsoleState::Status::Off, "wing client: disconnects cleanly", 0);
+
+    // No console at that address: reports it instead of hanging.
+    WingClient lonely;
+    lonely.connect ("127.0.0.1", { 9, 9, 9 });
+    check (waitFor ([&] { return lonely.getState().status == ConsoleState::Status::NoReply; }, 7000),
+           "wing client: says when the console doesn't answer", 0);
+    lonely.disconnect();
+    console.stop();
+}
 } // namespace
 
 int main()
@@ -668,6 +808,8 @@ int main()
     testEngine();
     testBusMode();
     testNetworkDevices();
+    testWingProtocol();
+    testWingClient();
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
 }

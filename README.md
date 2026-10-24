@@ -145,7 +145,35 @@ Click **Plugins... → Options... → Scan for new or updated VST3 plug-ins** (a
 runs inside the app; if a plugin crashes the scan, relaunch and scan again and that plugin will be
 skipped. Then click any **+ insert** button to load one.
 
-### 5. Lock it for Sabbath
+### 5. Watching the console (WING over the network)
+
+Click **Console** for a separate window that shows the WING channels feeding the stream bus, the way
+BoxCast RemoteMix does: each channel's name and colour from the console, its input meter, its send
+level to the stream bus (PRE/POST) and its fader. It only reads from the console; nothing in
+StreamRack changes the WING.
+
+- **Connect:** the color Mac must reach the WING's own **Ethernet port** (on the back of the console,
+  not the Dante card's ports). Click **Connect... → Search the network**, or type the WING's IP
+  address (on the WING: **Setup → Network**). macOS will ask whether StreamRack may find devices on
+  the local network: click **Allow** (it can be changed later in System Settings → Privacy &
+  Security → Local Network). StreamRack reconnects to the same console when it starts.
+- **Pick the stream bus** in the dropdown (it picks a bus named "STREAM" by itself). **All channels**
+  also shows named channels that aren't sent to it.
+- **What the tiles mean:** a green outline means the channel is live on the stream. **MUTED - LIVE**
+  with an amber outline means someone is talking or playing on a channel that is muted, so the
+  stream can't hear it. **FADER DOWN** means a post-fader send whose fader is down. **NOT ON
+  STREAM** means the send is off. The tile on the left is the stream bus itself, with its meter and
+  a **BUS MUTED** warning.
+- **Demo console:** a pretend WING on the same Mac (in the Connect dialog) for learning the screen
+  away from the booth.
+
+How it works: control values come over the WING's OSC interface (UDP 2223, change notifications kept
+alive every 4 s), meters over its binary meter interface (TCP 2222 plus a UDP stream, kept alive
+every 3 s), and discovery is a "WING?" broadcast to UDP 2222. Each church sets its console address
+locally; nothing goes through the internet. The protocol is tested against a simulated console;
+on real WINGs, check that the names, sends and meters match the console's own screen the first time.
+
+### 6. Lock it for Sabbath
 
 Set things up, save a scene, then click **Lock** and choose a PIN. Volunteers get the simple view
 (meters, loudness, faders and scene recall). **Unlock** asks for the PIN.
@@ -183,8 +211,9 @@ To use an existing JUCE checkout instead of downloading it, pass `-DSTREAMRACK_J
 | `Source/Engine/PitchCorrector.h` | Vocal pitch detection (YIN) and pitch-synchronous shifter |
 | `Source/Engine/PluginSlot.*`, `PluginHost.*` | VST3/AU hosting |
 | `Source/Engine/Params.*` | Every parameter, its range and its default |
-| `Source/UI/*` | Main window, Bus mode screen, strips, channel editor and EQ curve, master panel, plugin windows |
-| `Tests/EngineTests.cpp` | Headless tests: loudness against EBU reference signals, limiter ceiling, EQ, compressor, leveler, pitch correction accuracy/stability/latency, Bus mode and channel routing, state, and the full device path with simulated Dante/SoundGrid-style devices (channel counts, 44.1-96 kHz, 32-1024 sample buffers) |
+| `Source/Console/*` | WING network protocol (OSC control, binary meters, discovery), the client, and a simulated WING |
+| `Source/UI/*` | Main window, Bus mode screen, strips, channel editor and EQ curve, master panel, console view, plugin windows |
+| `Tests/EngineTests.cpp` | Headless tests: loudness against EBU reference signals, limiter ceiling, EQ, compressor, leveler, pitch correction accuracy/stability/latency, Bus mode and channel routing, state, and the full device path with simulated Dante/SoundGrid-style devices (channel counts, 44.1-96 kHz, 32-1024 sample buffers), and the WING client against the simulated console |
 
 ## Licensing
 
@@ -198,4 +227,5 @@ VST is a trademark of Steinberg Media Technologies GmbH.
 - Out-of-process plugin scanning so a bad plugin can't crash a scan
 - Per-channel presets ("Pastor lav", "Acoustic guitar")
 - Solo/PFL to the headphone output
+- Adjusting the stream bus sends from the Console window (BoxCast RemoteMix-style control)
 - Remote control from a tablet (OSC or a small web page)

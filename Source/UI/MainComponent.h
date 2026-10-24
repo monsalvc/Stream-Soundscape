@@ -1,6 +1,8 @@
 #pragma once
 
 #include "BusPanel.h"
+#include "ConsolePanel.h"
+#include "Console/WingSimulator.h"
 #include "DetailPanel.h"
 #include "MasterPanel.h"
 #include "StripComponent.h"
@@ -41,6 +43,10 @@ private:
     void showPluginScanner();
     void showScenesMenu();
     void lockClicked();
+    void showConsole();
+    void showConnectDialog();
+    void connectConsole (const juce::String& host);
+    void disconnectConsole();
     void askForText (const juce::String& title, const juce::String& message, bool password,
                      std::function<void (juce::String)> onOk);
 
@@ -55,7 +61,7 @@ private:
     juce::Label title, status;
     juce::Image logo;
     juce::Rectangle<int> logoArea;
-    juce::TextButton audioButton { "Audio..." }, pluginsButton { "Plugins..." }, scenesButton { "Scenes" },
+    juce::TextButton consoleButton { "Console" }, audioButton { "Audio..." }, pluginsButton { "Plugins..." }, scenesButton { "Scenes" },
         lockButton { "Lock" };
     juce::TextButton busModeButton { "Bus" }, advancedModeButton { "Advanced" };
 
@@ -65,6 +71,12 @@ private:
     DetailPanel detail;
     BusPanel busPanel;
     MasterPanel master;
+
+    // WING monitoring (the window is declared after the client so it goes first).
+    std::unique_ptr<wing::WingSimulator> demoConsole;
+    wing::WingClient wingClient;
+    ConsolePanel* consolePanel = nullptr;
+    std::unique_ptr<juce::DocumentWindow> consoleWindow;
 
     bool locked = false, busMode = true;
     int selected = -1;

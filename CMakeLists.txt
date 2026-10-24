@@ -23,7 +23,9 @@ set(ENGINE_SOURCES
     Source/Engine/PluginSlot.cpp
     Source/Engine/PluginHost.cpp
     Source/Engine/ChannelStrip.cpp
-    Source/Engine/RackProcessor.cpp)
+    Source/Engine/RackProcessor.cpp
+    Source/Console/WingClient.cpp
+    Source/Console/WingSimulator.cpp)
 
 set(COMMON_DEFINITIONS
     JUCE_PLUGINHOST_VST3=1
@@ -46,7 +48,8 @@ juce_add_gui_app(StreamRack
     VERSION ${PROJECT_VERSION}
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/icon.png"
     MICROPHONE_PERMISSION_ENABLED TRUE
-    MICROPHONE_PERMISSION_TEXT "StreamRack needs audio input access to receive Dante channels.")
+    MICROPHONE_PERMISSION_TEXT "StreamRack needs audio input access to receive Dante channels."
+    PLIST_TO_MERGE "<plist><dict><key>NSLocalNetworkUsageDescription</key><string>StreamRack reads channel names, sends and meters from your mixing console over the local network.</string></dict></plist>")
 
 juce_add_binary_data(StreamRackAssets SOURCES Resources/icon.png)
 
@@ -56,6 +59,7 @@ target_sources(StreamRack PRIVATE
     Source/UI/MainComponent.cpp
     Source/UI/StripComponent.cpp
     Source/UI/BusPanel.cpp
+    Source/UI/ConsolePanel.cpp
     Source/UI/DetailPanel.cpp
     Source/UI/EqCurve.cpp
     Source/UI/MasterPanel.cpp
