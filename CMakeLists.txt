@@ -24,6 +24,7 @@ set(ENGINE_SOURCES
     Source/Engine/PluginHost.cpp
     Source/Engine/ChannelStrip.cpp
     Source/Engine/RackProcessor.cpp
+    Source/Engine/Recorder.cpp
     Source/Console/WingClient.cpp
     Source/Console/WingSimulator.cpp)
 

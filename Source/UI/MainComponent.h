@@ -39,6 +39,9 @@ private:
     void showPluginScanner();
     void showScenesMenu();
     void lockClicked();
+    void recordClicked();
+    void showRecordMenu();
+    void updateRecordButton();
     void showConnectDialog();
     void connectConsole (const juce::String& host);
     void disconnectConsole();
@@ -59,6 +62,8 @@ private:
     juce::TextButton audioButton { "Audio..." }, pluginsButton { "Plugins..." }, scenesButton { "Scenes" },
         lockButton { "Lock" };
     juce::TextButton busViewButton { "Bus" }, wingViewButton { "WING Mix" };
+    juce::TextButton recordButton, recordMenuButton;
+    std::unique_ptr<juce::FileChooser> folderChooser;
 
     BusPanel busPanel;
     MasterPanel master;

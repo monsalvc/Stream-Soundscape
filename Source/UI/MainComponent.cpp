@@ -29,6 +29,18 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
     status.setFont (juce::FontOptions (12.0f));
     addAndMakeVisible (status);
 
+    // Recording: the finished stream mix (and optionally the raw bus) to WAV files.
+    recordButton.setTooltip ("Record the stream mix to a WAV file");
+    recordButton.onClick = [this] { recordClicked(); };
+    recordMenuButton.setButtonText (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe")));
+    recordMenuButton.setTooltip ("Recording options");
+    recordMenuButton.onClick = [this] { showRecordMenu(); };
+    recordButton.setConnectedEdges (juce::Button::ConnectedOnRight);
+    recordMenuButton.setConnectedEdges (juce::Button::ConnectedOnLeft);
+    addAndMakeVisible (recordButton);
+    addAndMakeVisible (recordMenuButton);
+    updateRecordButton();
+
     audioButton.onClick = [this] { showAudioSettings(); };
     pluginsButton.onClick = [this] { showPluginScanner(); };
     scenesButton.onClick = [this] { showScenesMenu(); };
@@ -137,6 +149,11 @@ void MainComponent::resized()
             bar.removeFromRight (narrowBar ? 4 : 6);
         }
     }
+    bar.removeFromRight (narrowBar ? 2 : 6);
+    if (recordMenuButton.isVisible())
+        recordMenuButton.setBounds (bar.removeFromRight (22));
+    recordButton.setBounds (bar.removeFromRight (narrowBar ? 74 : 104));
+    bar.removeFromRight (narrowBar ? 4 : 10);
     status.setVisible (bar.getWidth() >= 80);
     status.setBounds (bar);
 
@@ -166,6 +183,7 @@ void MainComponent::timerCallback()
     {
         statusCountdown = 15;
         updateStatus();
+        updateRecordButton();
     }
 }
 
@@ -176,6 +194,20 @@ void MainComponent::updateStatus()
     {
         status.setText ("No audio device. Click Audio... to choose Dante Virtual Soundcard.", juce::dontSendNotification);
         status.setColour (juce::Label::textColourId, colours::red);
+        return;
+    }
+
+    if (rack.recorder.isRecording())
+    {
+        const auto file = rack.recorder.getStreamFile();
+        const auto freeGb = (double) file.getBytesFreeOnVolume() / 1.0e9;
+        juce::String text = "Recording " + file.getFileName() + "   " + juce::File::descriptionOfSizeInBytes (file.getSize());
+        if (rack.recorder.getDroppedBlocks() > 0)
+            text << "   the disk is too slow: some audio was skipped";
+        else if (freeGb < 2.0)
+            text << "   only " << juce::String (freeGb, 1) << " GB free";
+        status.setText (text, juce::dontSendNotification);
+        status.setColour (juce::Label::textColourId, freeGb < 2.0 || rack.recorder.getDroppedBlocks() > 0 ? colours::amber : colours::text);
         return;
     }
 
@@ -227,6 +259,7 @@ void MainComponent::setLocked (bool shouldLock)
 
     audioButton.setVisible (! locked);
     pluginsButton.setVisible (! locked);
+    recordMenuButton.setVisible (! locked); // volunteers can still start and stop recording
     lockButton.setButtonText (locked ? "Unlock" : "Lock");
     resized();
     repaint();
@@ -273,6 +306,96 @@ void MainComponent::disconnectConsole()
     settings.setValue ("wingHost", juce::String());
     wingClient.disconnect();
     demoConsole.reset();
+}
+
+//==============================================================================
+void MainComponent::updateRecordButton()
+{
+    if (rack.recorder.isRecording())
+    {
+        const auto secs = (int) rack.recorder.getSecondsRecorded();
+        recordButton.setButtonText (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xa0 ")) // stop square
+                                    + juce::String::formatted ("%d:%02d:%02d", secs / 3600, (secs / 60) % 60, secs % 60));
+        recordButton.setColour (juce::TextButton::buttonColourId, colours::red);
+        recordButton.setColour (juce::TextButton::textColourOffId, colours::text);
+        recordButton.setTooltip ("Recording. Click to stop and finish the file.");
+    }
+    else
+    {
+        recordButton.setButtonText (juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x8f Record"))); // dot
+        recordButton.removeColour (juce::TextButton::buttonColourId);
+        recordButton.setColour (juce::TextButton::textColourOffId, colours::red);
+        recordButton.setTooltip ("Record the stream mix to a WAV file");
+    }
+}
+
+void MainComponent::recordClicked()
+{
+    if (! rack.recorder.isRecording())
+    {
+        const juce::File folder (settings.getValue ("recordFolder", Recorder::defaultFolder().getFullPathName()));
+        juce::String error;
+        if (! rack.recorder.start (folder, settings.getBoolValue ("recordRaw", false), error))
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Record", error);
+        updateRecordButton();
+        updateStatus();
+        return;
+    }
+
+    // Stopping mid-service by accident would be costly, so ask.
+    juce::Component::SafePointer<MainComponent> safeThis (this);
+    juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Stop recording?",
+                                        "The file will be finished and saved in " + rack.recorder.getStreamFile().getParentDirectory().getFullPathName() + ".",
+                                        "Stop", "Keep recording", this,
+                                        juce::ModalCallbackFunction::create ([safeThis] (int result)
+    {
+        if (safeThis == nullptr || result != 1)
+            return;
+        safeThis->rack.recorder.stop();
+        safeThis->updateRecordButton();
+        safeThis->updateStatus();
+    }));
+}
+
+void MainComponent::showRecordMenu()
+{
+    const juce::File folder (settings.getValue ("recordFolder", Recorder::defaultFolder().getFullPathName()));
+    const bool raw = settings.getBoolValue ("recordRaw", false);
+
+    juce::PopupMenu menu;
+    menu.addItem (1, "Open recordings folder");
+    menu.addItem (2, "Choose folder...  (" + folder.getFileName() + ")", ! rack.recorder.isRecording());
+    menu.addSeparator();
+    menu.addItem (3, "Also record the raw bus (before color)", ! rack.recorder.isRecording(), raw);
+    menu.addSeparator();
+    menu.addItem (4, "WAV, 24-bit: about 1 GB per hour of stereo", false, false);
+
+    juce::Component::SafePointer<MainComponent> safeThis (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&recordMenuButton), [safeThis, folder, raw] (int result)
+    {
+        if (safeThis == nullptr)
+            return;
+        auto& self = *safeThis;
+        if (result == 1)
+        {
+            folder.createDirectory();
+            folder.startAsProcess(); // opens it in Finder
+        }
+        else if (result == 2)
+        {
+            self.folderChooser = std::make_unique<juce::FileChooser> ("Where should recordings go?", folder);
+            self.folderChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                                             [safeThis] (const juce::FileChooser& chooser)
+            {
+                if (safeThis != nullptr && chooser.getResult() != juce::File())
+                    safeThis->settings.setValue ("recordFolder", chooser.getResult().getFullPathName());
+            });
+        }
+        else if (result == 3)
+        {
+            self.settings.setValue ("recordRaw", ! raw);
+        }
+    });
 }
 
 //==============================================================================

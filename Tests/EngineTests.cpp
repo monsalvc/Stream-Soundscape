@@ -812,6 +812,69 @@ void testWingClient()
     lonely.disconnect();
     console.stop();
 }
+
+//==============================================================================
+void testRecorder()
+{
+    sr::PluginHost host (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("streamrack-test"));
+    sr::RackProcessor rack (host);
+    const int numIn = 4, block = 256;
+    rack.setPlayConfigDetails (numIn, 2, fs, block);
+    rack.prepareToPlay (fs, block);
+    setParam (rack, sr::masterId ("levOn"), 0.0f);
+    setParam (rack, sr::masterId ("busTrim"), -6.0f); // so the stream file differs from the raw one
+
+    auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("streamrack-rec-test");
+    folder.deleteRecursively();
+    juce::String error;
+    const bool started = rack.recorder.start (folder, true, error);
+    check (started, "recorder: starts (stream + raw)", 0);
+
+    juce::AudioBuffer<float> buffer (numIn, block);
+    juce::MidiBuffer midi;
+    double phase = 0;
+    const int blocks = (int) (2.0 * fs / block);
+    float outPeak = 0.0f;
+    for (int b = 0; b < blocks; ++b)
+    {
+        buffer.clear();
+        for (int i = 0; i < block; ++i)
+        {
+            const float v = 0.5f * (float) std::sin (phase);
+            phase += juce::MathConstants<double>::twoPi * 440.0 / fs;
+            buffer.setSample (0, i, v);
+            buffer.setSample (1, i, v);
+        }
+        rack.processBlock (buffer, midi);
+        if (b > blocks / 2)
+            outPeak = juce::jmax (outPeak, buffer.getMagnitude (0, 0, block));
+    }
+    const double seconds = rack.recorder.getSecondsRecorded();
+    const auto streamFile = rack.recorder.getStreamFile();
+    rack.recorder.stop();
+    check (std::abs (seconds - blocks * block / fs) < 0.01, "recorder: counts the recorded time", seconds);
+
+    juce::WavAudioFormat wav;
+    const auto readPeak = [&] (const juce::File& f, juce::int64& length)
+    {
+        std::unique_ptr<juce::AudioFormatReader> reader (wav.createReaderFor (f.createInputStream().release(), true));
+        if (reader == nullptr)
+            return -1.0f;
+        length = reader->lengthInSamples;
+        juce::AudioBuffer<float> data (2, (int) length);
+        reader->read (&data, 0, (int) length, 0, true, true);
+        return data.getMagnitude (0, (int) length / 2, (int) length / 2);
+    };
+    juce::int64 streamLength = 0, rawLength = 0;
+    const float streamPeak = readPeak (streamFile, streamLength);
+    const auto rawFile = folder.getChildFile (streamFile.getFileName().replace ("stream", "raw"));
+    const float rawPeak = readPeak (rawFile, rawLength);
+    check (streamLength == (juce::int64) blocks * block && rawLength == streamLength, "recorder: both files hold every sample",
+           (double) streamLength);
+    check (std::abs (streamPeak - outPeak) < 0.002f, "recorder: stream file matches what went to Wirecast", streamPeak);
+    check (std::abs (rawPeak - 0.5f) < 0.002f, "recorder: raw file is the bus before processing", rawPeak);
+    folder.deleteRecursively();
+}
 } // namespace
 
 int main()
@@ -826,6 +889,7 @@ int main()
     testEngine();
     testBusMode();
     testNetworkDevices();
+    testRecorder();
     testWingProtocol();
     testWingClient();
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");

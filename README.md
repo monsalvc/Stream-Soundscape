@@ -43,6 +43,13 @@ and loudness) stay on screen in both.
   against the -14 LUFS YouTube target. Green means on target, amber means quiet, red means hot.
 - **WING Mix:** the console channels feeding the stream bus, with who is talking, what is muted, and
   the stream sends, which can be adjusted from here without touching the house mix.
+- **Recording:** **● Record** in the top bar saves the finished stream mix (exactly what goes to
+  Wirecast) as a 24-bit WAV file, about 1 GB per hour, in `~/Music/StreamRack Recordings` (named by
+  date and time). The button shows the running time; clicking it again asks before stopping. The
+  **▾** menu opens the folder, picks another folder, and can also save the raw bus (before any
+  color) as a second file for remixing later. The file is kept playable every 5 s even if the Mac
+  crashes, and the status line warns when the disk has less than 2 GB free. Volunteers can start and
+  stop recording in Lock mode.
 - **Scenes:** save and recall full snapshots (settings and plugins), for example "Sabbath Worship" or
   "Sabbath School". They are stored in `~/Documents/StreamRack Scenes`.
 - **Lock mode for volunteers:** a PIN-protected view that shows only meters, loudness, faders and
@@ -213,6 +220,7 @@ To use an existing JUCE checkout instead of downloading it, pass `-DSTREAMRACK_J
 | `Source/Engine/Leveler.h` | Automatic leveler |
 | `Source/Engine/PitchCorrector.h` | Vocal pitch detection (YIN) and pitch-synchronous shifter |
 | `Source/Engine/PluginSlot.*`, `PluginHost.*` | VST3/AU hosting |
+| `Source/Engine/Recorder.*` | WAV recording of the stream mix and the raw bus |
 | `Source/Engine/Params.*` | Every parameter, its range and its default |
 | `Source/Console/*` | WING network protocol (OSC control, binary meters, discovery), the client, and a simulated WING |
 | `Source/UI/*` | Main window, Bus view, WING Mix view, master panel, plugin windows |

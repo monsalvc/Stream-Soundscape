@@ -86,6 +86,7 @@ void RackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamples
     fadeLength = juce::jmax (1, (int) (sampleRate * 0.05));
     fadeFromPair = -1;
     loudness.prepare (sampleRate);
+    recorder.prepare (sampleRate);
     masterGain.reset (sampleRate, 0.05);
     verbReturn.reset (sampleRate, 0.05);
 }
@@ -108,6 +109,7 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
             inputPtrs[(size_t) ch] = buffer.getReadPointer (ch, start);
 
         processChunk (inputPtrs.data(), numIn, mix.getWritePointer (0), mix.getWritePointer (1), n);
+        recorder.writeStream (mix.getReadPointer (0), mix.getReadPointer (1), n);
 
         if (numOut >= 2)
         {
@@ -189,6 +191,8 @@ void RackProcessor::processChunk (const float* const* inputs, int numInputs, flo
             if (fadePos >= fadeLength)
                 fadeFromPair = -1;
         }
+
+        recorder.writeRaw (outL, outR, n); // the bus as it arrived, before any processing
 
         busTrim.setTargetValue (juce::Decibels::decibelsToGain (m.busTrim->load()));
         for (int i = 0; i < n; ++i)

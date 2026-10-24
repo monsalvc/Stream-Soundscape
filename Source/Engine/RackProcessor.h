@@ -4,6 +4,7 @@
 #include "Leveler.h"
 #include "LoudnessMeter.h"
 #include "PluginHost.h"
+#include "Recorder.h"
 
 namespace sr
 {
@@ -71,6 +72,10 @@ public:
     std::function<void (PluginSlot&)> onSlotAboutToChange;
 
     PluginHost& getHost() noexcept { return host; }
+
+    //==========================================================================
+    // Records the stream mix (and optionally the raw bus) to WAV files.
+    Recorder recorder;
 
     //==========================================================================
     // Metering, read by the UI.
