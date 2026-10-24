@@ -273,6 +273,7 @@ void MainComponent::showConnectDialog()
     panel->onConnect = [this] (juce::String h) { connectConsole (h); };
     panel->onDemo = [this] { connectConsole ("demo"); };
     panel->onDisconnect = [this] { disconnectConsole(); };
+    panel->getDiagnostics = [this] { return wingClient.getDiagnostics(); };
 
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned (panel);

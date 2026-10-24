@@ -100,7 +100,8 @@ namespace
 
         // Cap: a raised block with a line across the middle.
         const float y = r.getBottom() - r.getHeight() * faderPosition (db);
-        const juce::Rectangle<float> cap (trackX - 13.0f, y - 8.0f, 26.0f, 16.0f);
+        const float capW = juce::jlimit (16.0f, 26.0f, (float) area.getWidth() - 6.0f);
+        const juce::Rectangle<float> cap (trackX - capW * 0.5f, y - 7.0f, capW, 14.0f);
         juce::ColourGradient grad (juce::Colour (0xffd9e2e3), cap.getX(), cap.getY(), juce::Colour (0xff8c9c9b), cap.getX(), cap.getBottom(), false);
         g.setGradientFill (grad);
         g.setOpacity (active ? 1.0f : 0.45f);
@@ -152,7 +153,7 @@ void SourceTile::paint (juce::Graphics& g)
         g.drawRoundedRectangle (r.reduced (1.0f), 5.0f, warning ? 2.0f : 1.5f);
     }
 
-    auto content = r.reduced (5.0f, 4.0f).toNearestInt();
+    auto content = r.reduced (3.0f, 4.0f).toNearestInt();
 
     // Scribble strip: console colour, name, channel number.
     auto scribble = content.removeFromTop (34);
@@ -162,40 +163,40 @@ void SourceTile::paint (juce::Graphics& g)
     g.setColour (lightInk ? juce::Colours::white : juce::Colour (0xff10201a));
     g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
     const auto number = index < wing::numChannels ? "CH " + juce::String (index + 1) : "AUX " + juce::String (index - wing::numChannels + 1);
-    g.drawText (number, scribble.removeFromTop (14).reduced (4, 0), juce::Justification::centredLeft);
-    g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
-    g.drawFittedText (source.name.isNotEmpty() ? source.name : number, scribble.reduced (3, 0), juce::Justification::centred, 1);
+    g.drawText (number, scribble.removeFromTop (14).reduced (3, 0), juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+    g.drawFittedText (source.name.isNotEmpty() ? source.name : number, scribble.reduced (2, 0), juce::Justification::centred, 1, 0.75f);
     content.removeFromTop (4);
 
     // Send mode and a signal light.
     auto modeRow = content.removeFromTop (16);
     g.setColour (talking ? (warning ? colours::amber : colours::green) : colours::background);
-    g.fillEllipse (modeRow.removeFromRight (12).withSizeKeepingCentre (8, 8).toFloat());
+    g.fillEllipse (modeRow.removeFromRight (10).withSizeKeepingCentre (7, 7).toFloat());
     g.setColour (colours::dim);
-    g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+    g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
     g.drawText (source.sendMode.isNotEmpty() ? source.sendMode : juce::String ("SEND"), modeRow, juce::Justification::centredLeft);
 
-    // Bottom: the send's ON button (the stream only) and the channel's mute light (the console's).
-    auto buttons = content.removeFromBottom (20);
-    onArea = buttons.removeFromLeft (buttons.getWidth() / 2 - 1);
-    buttons.removeFromLeft (2);
+    // Bottom: the channel's mute light (the console's) and the send's ON button (the stream only).
+    auto muteLight = content.removeFromBottom (17);
+    content.removeFromBottom (2);
+    onArea = content.removeFromBottom (17);
+    drawButtonLight (g, muteLight, warning && source.mute ? "MUTE!" : "MUTE", source.mute, colours::red);
     drawButtonLight (g, onArea, "ON", source.sendOn, colours::green.darker (0.5f));
-    drawButtonLight (g, buttons, warning && source.mute ? "MUTE!" : "MUTE", source.mute, colours::red);
     content.removeFromBottom (3);
     g.setColour (colours::dim);
-    g.setFont (juce::FontOptions (9.5f));
-    g.drawText ("Ch fdr " + formatDb (source.fader), content.removeFromBottom (12), juce::Justification::centred);
+    g.setFont (juce::FontOptions (9.0f));
+    g.drawFittedText ("Ch " + formatDb (source.fader), content.removeFromBottom (12), juce::Justification::centred, 1);
     g.setColour (inMix ? colours::text : colours::dim);
-    g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+    g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
     g.drawText (source.sendOn ? formatDb (source.sendLevel) : juce::String ("OFF"), content.removeFromBottom (16), juce::Justification::centred);
     content.removeFromBottom (2);
 
     // The send to the stream bus as a fader, with the channel's input meter beside it.
-    auto meter = content.removeFromRight (6).reduced (0, 6);
+    auto meter = content.removeFromRight (5).reduced (0, 6);
     drawMeterBar (g, meter.toFloat(), meterDb, feeds);
-    content.removeFromRight (2);
+    content.removeFromRight (1);
     faderArea = content;
-    drawFader (g, content, source.sendLevel, colour, inMix, content.getHeight() > 90);
+    drawFader (g, content, source.sendLevel, colour, inMix, content.getHeight() > 90 && content.getWidth() >= 50);
 }
 
 void SourceTile::setEditable (bool shouldEdit)
@@ -587,7 +588,7 @@ void ConsolePanel::resized()
 
     // Like a console: the channels feeding the stream in a row (scrolling sideways), the stream
     // bus as a master strip on the right.
-    mixTile.setBounds (r.removeFromRight (SourceTile::width + 14));
+    mixTile.setBounds (r.removeFromRight (76));
     r.removeFromRight (6);
     viewport.setBounds (r);
     layoutTiles();
@@ -636,13 +637,23 @@ ConnectPanel::ConnectPanel (const juce::String& currentHost, bool connected)
         close();
     };
     disconnectButton.setEnabled (connected);
+    diagnosticsButton.setTooltip ("Copy what the console has been answering, to send to whoever looks after StreamRack");
+    diagnosticsButton.onClick = [this]
+    {
+        if (getDiagnostics)
+        {
+            juce::SystemClipboard::copyTextToClipboard (getDiagnostics());
+            diagnosticsButton.setButtonText ("Copied");
+        }
+    };
 
     address.setText (currentHost == "demo" ? juce::String() : currentHost, false);
     address.setTextToShowWhenEmpty ("e.g. 192.168.1.62", colours::dim);
     address.setJustification (juce::Justification::centredLeft);
     address.onReturnKey = [this] { connectButton.triggerClick(); };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &searchButton, &connectButton, &demoButton, &disconnectButton, &address })
+    for (auto* c : std::initializer_list<juce::Component*> { &searchButton, &connectButton, &demoButton, &disconnectButton,
+                                                             &diagnosticsButton, &address })
         addAndMakeVisible (c);
     setSize (440, 250);
 }
@@ -729,7 +740,9 @@ void ConnectPanel::resized()
     row.removeFromRight (6);
     address.setBounds (row);
     auto bottom = getLocalBounds().reduced (16).removeFromBottom (30);
-    demoButton.setBounds (bottom.removeFromLeft (130));
-    disconnectButton.setBounds (bottom.removeFromRight (110));
+    demoButton.setBounds (bottom.removeFromLeft (120));
+    disconnectButton.setBounds (bottom.removeFromRight (100));
+    bottom.reduce (8, 0);
+    diagnosticsButton.setBounds (bottom.withSizeKeepingCentre (juce::jmin (bottom.getWidth(), 150), bottom.getHeight()));
 }
 } // namespace sr::ui

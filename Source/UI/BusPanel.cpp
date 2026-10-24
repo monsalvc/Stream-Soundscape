@@ -58,6 +58,20 @@ BusPanel::BusPanel (RackProcessor& r) : rack (r)
     inputAttachment = std::make_unique<Apvts::ComboBoxAttachment> (rack.state, masterId ("busSrc"), input);
     addAndMakeVisible (input);
 
+    channelsBox.addItemList ({ "Stereo", "Left only (to both)", "Right only (to both)", "Mono sum" }, 1);
+    channelsBox.setTooltip ("Use Left only or Right only when the bus arrives on one side (a mono bus, or one "
+                            "Dante channel routed); Mono sum folds both sides together");
+    channelsAttachment = std::make_unique<Apvts::ComboBoxAttachment> (rack.state, masterId ("busChannels"), channelsBox);
+    addAndMakeVisible (channelsBox);
+    fixButton.setTooltip ("Only one side of the bus has signal: copy it to both sides");
+    fixButton.onClick = [this]
+    {
+        if (auto* p = rack.state.getParameter (masterId ("busChannels")))
+            p->setValueNotifyingHost (p->convertTo0to1 (silentSide == 1 ? 1.0f : 2.0f));
+        oneSideFrames = 0;
+    };
+    addChildComponent (fixButton);
+
     renameButton.setTooltip ("Name the selected Dante pair (e.g. \"Stream bus\") to get a one-click button for it");
     renameButton.onClick = [this] { renameCurrentPair(); };
     addAndMakeVisible (renameButton);
@@ -160,6 +174,30 @@ void BusPanel::tick()
         b->setToggleState (b->pair == current, juce::dontSendNotification);
     }
 
+    // Only one side of the pair has signal for a couple of seconds: offer to copy it to both.
+    {
+        const float rawL = juce::Decibels::gainToDecibels (rack.busRawPeakL.exchange (0.0f), -100.0f);
+        const float rawR = juce::Decibels::gainToDecibels (rack.busRawPeakR.exchange (0.0f), -100.0f);
+        const int side = rawL > -50.0f && rawR < -80.0f ? 1 : (rawR > -50.0f && rawL < -80.0f ? 0 : -1);
+        if (side >= 0 && (side == silentSide || oneSideFrames == 0))
+        {
+            silentSide = side;
+            oneSideFrames = juce::jmin (oneSideFrames + 1, 1000);
+        }
+        else if (rawL > -50.0f && rawR > -50.0f)
+        {
+            oneSideFrames = 0;
+        }
+        const bool stereo = channelsBox.getSelectedId() == 1;
+        const bool show = stereo && oneSideFrames > 60 && ! locked;
+        if (show != fixButton.isVisible())
+        {
+            fixButton.setButtonText (silentSide == 1 ? "Use left on both" : "Use right on both");
+            fixButton.setVisible (show);
+            repaint (inputLabelArea);
+        }
+    }
+
     const float l = rack.busInPeakL.exchange (0.0f), r = rack.busInPeakR.exchange (0.0f);
     meterL.setLevel (l);
     meterR.setLevel (r);
@@ -195,7 +233,10 @@ void BusPanel::paint (juce::Graphics& g)
                     juce::Justification::centredLeft);
         g.setColour (colours::dim);
         g.setFont (juce::FontOptions (12.0f));
-        g.drawFittedText (silent ? "No signal: check Dante routing" : (hot ? "Very hot: lower the trim" : "dBFS peak"),
+        if (fixButton.isVisible())
+            g.setColour (colours::amber);
+        g.drawFittedText (fixButton.isVisible() ? (silentSide == 1 ? "Only the left side has signal" : "Only the right side has signal")
+                          : silent ? "No signal: check Dante routing" : (hot ? "Very hot: lower the trim" : "dBFS peak"),
                           a.removeFromTop (18), juce::Justification::centredLeft, 1);
     }
 
@@ -315,7 +356,7 @@ void BusPanel::resized()
     a.removeFromLeft (16);
 
     // Quick-pick row along the bottom of the input box, when there's room for it.
-    const bool showPicks = a.getHeight() >= 28 + 8 + 52 + 8 + 30 && (! picks.isEmpty() || ! locked);
+    const bool showPicks = a.getHeight() >= 28 + 6 + 24 + 8 + 52 + 8 + 30 && (! picks.isEmpty() || ! locked);
     picksArea = showPicks ? a.removeFromBottom (30) : juce::Rectangle<int>();
     if (showPicks)
         a.removeFromBottom (8);
@@ -333,6 +374,12 @@ void BusPanel::resized()
         row.removeFromRight (6);
     }
     input.setBounds (row);
+    col.removeFromTop (6);
+    auto channelsRow = col.removeFromTop (24);
+    channelsBox.setEnabled (! locked);
+    channelsBox.setBounds (channelsRow.removeFromLeft (juce::jmin (170, channelsRow.getWidth() / 2 + 20)));
+    channelsRow.removeFromLeft (6);
+    fixButton.setBounds (channelsRow.removeFromLeft (juce::jmin (130, channelsRow.getWidth())));
     col.removeFromTop (8);
     inputLabelArea = col.removeFromTop (juce::jmin (72, col.getHeight()));
     if (roomForTrim)

@@ -124,6 +124,9 @@ check the app: open **System Settings → Privacy & Security** and click **Open 
    - This Mac's DVS transmit channels **1-2** → the Wirecast Mac's DVS receive channels that Wirecast
      already uses. StreamRack sends the finished mix to every output pair, so 1-2 is all you need.
 4. In Bus mode, pick the Dante pair the bus arrives on in **STREAM BUS IN** and check the meters move.
+   If only one meter moves (the bus is mono on the WING, or only one Dante channel is routed), set
+   **Channels** under the dropdown to **Left only** or **Right only** to put it on both sides; the
+   screen offers this itself when one side stays silent. **Mono sum** folds both sides together.
    If the WING sends several buses (say the stream bus on 1-2 and a youth-service bus on 3-4),
    select each pair and click **Name...**. Every named pair gets a one-click button under the
    dropdown with a dot that lights when that pair has signal. Switching crossfades over 50 ms, so it
@@ -182,6 +185,10 @@ right.
   for 0 dB), switch a send **ON**/off, or move and mute the stream bus on the master strip. These
   only change the stream: the channel faders and mutes that the house hears stay on the console
   (their lights are display-only). Lock mode turns editing off.
+- **Names:** StreamRack shows the name the WING's screen shows. If a channel has no name of its own,
+  it shows the name of the input it's patched to. If names are still missing, **Connect... → Copy
+  diagnostics** copies what the console has been answering, to send to whoever looks after
+  StreamRack.
 - **Demo console:** a pretend WING on the same Mac (in the Connect dialog) for learning the screen
   away from the booth.
 

@@ -39,7 +39,7 @@ RackProcessor::RackProcessor (PluginHost& h)
     m = { get ("compOn"),   get ("compThr"),  get ("compRatio"),  get ("compAtk"), get ("compRel"),
           get ("compMakeup"), get ("verbSize"), get ("verbDamp"), get ("verbReturn"), get ("limOn"),
           get ("ceiling"),  get ("limRel"),   get ("fader"),    get ("busMode"), get ("busSrc"),
-          get ("busTrim"),  get ("levOn"),    get ("levTarget"), get ("levRange"), get ("levSpeed") };
+          get ("busTrim"),  get ("busChannels"), get ("levOn"),    get ("levTarget"), get ("levRange"), get ("levSpeed") };
 }
 
 RackProcessor::~RackProcessor()
@@ -193,6 +193,23 @@ void RackProcessor::processChunk (const float* const* inputs, int numInputs, flo
         }
 
         recorder.writeRaw (outL, outR, n); // the bus as it arrived, before any processing
+
+        if (const float pl = peakOf (outL, n); pl > busRawPeakL.load())
+            busRawPeakL = pl;
+        if (const float pr = peakOf (outR, n); pr > busRawPeakR.load())
+            busRawPeakR = pr;
+
+        switch ((int) m.busChannels->load())
+        {
+            case 1: juce::FloatVectorOperations::copy (outR, outL, n); break;
+            case 2: juce::FloatVectorOperations::copy (outL, outR, n); break;
+            case 3:
+                juce::FloatVectorOperations::add (outL, outR, n);
+                juce::FloatVectorOperations::multiply (outL, 0.5f, n);
+                juce::FloatVectorOperations::copy (outR, outL, n);
+                break;
+            default: break;
+        }
 
         busTrim.setTargetValue (juce::Decibels::decibelsToGain (m.busTrim->load()));
         for (int i = 0; i < n; ++i)

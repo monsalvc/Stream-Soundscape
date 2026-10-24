@@ -11,7 +11,7 @@ namespace sr::ui
 class SourceTile : public juce::Component
 {
 public:
-    static constexpr int width = 78, minHeight = 190;
+    static constexpr int width = 56, minHeight = 200;
 
     void update (const wing::SourceState&, int index);
     void setEditable (bool);
@@ -111,6 +111,7 @@ public:
 
     std::function<void (juce::String host)> onConnect;
     std::function<void()> onDemo, onDisconnect;
+    std::function<juce::String()> getDiagnostics;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -120,7 +121,7 @@ private:
     void close();
 
     juce::TextButton searchButton { "Search the network" }, connectButton { "Connect" },
-        demoButton { "Demo console" }, disconnectButton { "Disconnect" };
+        demoButton { "Demo console" }, disconnectButton { "Disconnect" }, diagnosticsButton { "Copy diagnostics" };
     juce::TextEditor address;
     juce::OwnedArray<juce::TextButton> found;
     juce::String searchMessage;

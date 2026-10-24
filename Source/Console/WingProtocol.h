@@ -75,6 +75,8 @@ struct SourceState
     float fader = minusInf;
     bool mute = false;
     bool known = false; // the console has answered for this source
+    juce::String connGroup; // the input it's patched to (e.g. "A", 5), for the input's name
+    int connInput = 0;
 
     // Send to the stream target.
     float sendLevel = minusInf;
@@ -154,6 +156,21 @@ inline bool apply (ConsoleState& state, const osc::Message& m)
     const int index = parts[1].getIntValue();
     const auto& field = parts[2];
 
+    // An input's own name: /io/in/<group>/<n>/name. Channels patched to it that have no name of
+    // their own show it (the WING does the same when a channel is linked to its source).
+    if (kind == "io" && parts.size() == 5 && parts[1] == "in" && parts[4] == "name")
+    {
+        const auto name = textValue (m);
+        bool used = false;
+        for (auto& s : state.sources)
+            if (s.connGroup == parts[2] && s.connInput == parts[3].getIntValue() && s.name.isEmpty())
+            {
+                s.name = name;
+                used = true;
+            }
+        return used || name.isEmpty();
+    }
+
     if (kind == "ch" || kind == "aux")
     {
         const int source = kind == "ch" ? index - 1 : numChannels + index - 1;
@@ -179,6 +196,17 @@ inline bool apply (ConsoleState& state, const osc::Message& m)
                 s.fader = numericValue (m);
             else if (field == "mute")
                 s.mute = numericValue (m) > 0.5f;
+            else
+                return false;
+            return true;
+        }
+
+        if (parts.size() == 5 && field == "in" && parts[3] == "conn")
+        {
+            if (parts[4] == "grp")
+                s.connGroup = textValue (m).trim();
+            else if (parts[4] == "in")
+                s.connInput = textValue (m).getIntValue();
             else
                 return false;
             return true;
@@ -238,7 +266,7 @@ inline juce::StringArray sourceAddresses (const Target& target)
     for (int s = 0; s < numSources; ++s)
     {
         const auto p = sourcePath (s);
-        for (const auto* f : { "/$name", "/$col", "/fdr", "/mute" })
+        for (const auto* f : { "/$name", "/name", "/$col", "/col", "/fdr", "/mute", "/in/conn/grp", "/in/conn/in" })
             a.add (p + f);
         a.addArray (sendAddresses (s, target));
     }
@@ -249,10 +277,10 @@ inline juce::StringArray mixAddresses()
 {
     juce::StringArray a;
     for (int b = 1; b <= numBuses; ++b)
-        for (const auto* f : { "/$name", "/fdr", "/mute" })
+        for (const auto* f : { "/$name", "/name", "/fdr", "/mute" })
             a.add ("/bus/" + juce::String (b) + f);
     for (int m = 1; m <= numMains; ++m)
-        for (const auto* f : { "/$name", "/fdr", "/mute" })
+        for (const auto* f : { "/$name", "/name", "/fdr", "/mute" })
             a.add ("/main/" + juce::String (m) + f);
     return a;
 }

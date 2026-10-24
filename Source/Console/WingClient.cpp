@@ -51,6 +51,10 @@ void WingClient::connect (const juce::String& newHost, Ports newPorts)
         ports = newPorts;
         const auto target = state.target;
         state = {};
+        recent.clear();
+        firstReplies.clear();
+        inputNamesAsked.clear();
+        requestsSent = messagesReceived = undecodable = notUnderstood = 0;
         state.target = target;
         state.host = host;
         state.status = ConsoleState::Status::Connecting;
@@ -163,6 +167,10 @@ void WingClient::run()
 
     // Ask the console directly for its name and model (the discovery reply).
     control.write (host, ports.discovery, "WING?", 5);
+
+    // A few probes whose raw answers show how this console names things (see getDiagnostics).
+    for (const auto* probe : { "/ch/1", "/ch/1/name", "/ch/1/$name", "/ch/1/clink", "/ch/1/in/conn/grp", "/ch/1/in/conn/in" })
+        pending.push_front (probe);
     juce::HeapBlock<uint8_t> buffer (65536);
 
     while (! threadShouldExit())
@@ -192,6 +200,7 @@ void WingClient::run()
             queue (mixAddresses());
             queue (sourceAddresses (target));
             lastRefresh = now;
+            inputNamesAsked.clear();
         }
 
         // Changes made in StreamRack go out first.
@@ -204,10 +213,12 @@ void WingClient::run()
             send (control, host, ports.osc, m);
 
         // Pace the requests so the console's receive buffer isn't flooded.
-        for (int n = 0; n < 8 && ! pending.empty(); ++n)
+        for (int n = 0; n < 3 && ! pending.empty(); ++n)
         {
             send (control, host, ports.osc, { pending.front(), {} });
             pending.pop_front();
+            const juce::ScopedLock sl (lock);
+            ++requestsSent;
         }
 
         // Meter connection: set up, then keep it alive (the console stops after 5 s).
@@ -263,12 +274,34 @@ void WingClient::run()
                     state.model = reply->model;
                     state.firmware = reply->firmware;
                 }
-                else if (osc::decode (buffer.get(), (size_t) size, m))
+                else if (! osc::decode (buffer.get(), (size_t) size, m))
                 {
-                    apply (state, m);
+                    ++undecodable;
+                    recent.add ("(not OSC, " + juce::String (size) + " bytes)");
+                }
+                else
+                {
+                    if (! apply (state, m))
+                        ++notUnderstood;
+                    logReceived (m);
                     lastReply = now;
                 }
             }
+        }
+
+        // Channels with no name of their own: ask for the name of the input they're patched to.
+        {
+            const juce::ScopedLock sl (lock);
+            for (const auto& s : state.sources)
+                if (s.name.isEmpty() && s.connGroup.isNotEmpty() && s.connInput > 0)
+                {
+                    const auto address = "/io/in/" + s.connGroup + "/" + juce::String (s.connInput) + "/name";
+                    if (! inputNamesAsked.contains (address))
+                    {
+                        inputNamesAsked.add (address);
+                        pending.push_back (address);
+                    }
+                }
         }
 
         // Incoming meter frames.
@@ -302,6 +335,49 @@ void WingClient::run()
             clearMeters (state);
         metersWereFlowing = metersFlowing;
     }
+}
+
+void WingClient::logReceived (const osc::Message& m)
+{
+    // Called with the lock held.
+    ++messagesReceived;
+    juce::String line = m.address + "  ";
+    for (const auto& a : m.args)
+        line << (a.type == osc::Arg::Type::String ? "s:\"" + a.s + "\" " : a.type == osc::Arg::Type::Float ? "f:" + juce::String (a.f) + " " : "i:" + juce::String (a.i) + " ");
+    line = line.substring (0, 300);
+    if (firstReplies.size() < 40)
+        firstReplies.add (line);
+    recent.add (line);
+    if (recent.size() > 120)
+        recent.removeRange (0, recent.size() - 120);
+}
+
+juce::String WingClient::getDiagnostics() const
+{
+    const juce::ScopedLock sl (lock);
+    juce::String d;
+    d << "StreamRack WING diagnostics\n";
+    d << "Console: " << state.host << "  name=\"" << state.consoleName << "\" model=" << state.model
+      << " firmware=" << state.firmware << "\n";
+    const char* statusNames[] = { "off", "connecting", "connected", "no answer" };
+    d << "Status: " << statusNames[(int) state.status] << ", meters " << (state.metersFlowing ? "flowing" : "not flowing") << "\n";
+    d << "Requests sent: " << requestsSent << ", messages received: " << messagesReceived
+      << ", not OSC: " << undecodable << ", not understood: " << notUnderstood << "\n";
+    d << "Stream target: " << state.target.label() << " (\"" << state.targetMix().name << "\")\n\n";
+
+    d << "Channels as understood:\n";
+    for (int s = 0; s < numSources; ++s)
+    {
+        const auto& src = state.sources[(size_t) s];
+        if (! src.known)
+            continue;
+        d << sourcePath (s) << "  name=\"" << src.name << "\" col=" << src.colour << " fdr=" << src.fader
+          << " mute=" << (int) src.mute << " send=" << (src.sendOn ? "on " : "off ") << src.sendLevel << " " << src.sendMode
+          << " in=" << src.inputDb() << "\n";
+    }
+    d << "\nFirst replies:\n" << firstReplies.joinIntoString ("\n") << "\n\nMost recent:\n"
+      << recent.joinIntoString ("\n") << "\n";
+    return d;
 }
 
 std::vector<Discovered> WingClient::discover (int timeoutMs, int port, const juce::String& broadcastAddress)

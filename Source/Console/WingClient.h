@@ -35,6 +35,10 @@ public:
     void setTargetFader (float db);
     void setTargetMute (bool mute);
 
+    // What the console has been answering, for troubleshooting: counts, a summary of what was
+    // understood, and the most recent raw messages.
+    juce::String getDiagnostics() const;
+
     // Broadcasts "WING?" and collects replies for timeoutMs. Blocks; call it off the message thread.
     static std::vector<Discovered> discover (int timeoutMs = 1500, int port = discoveryPort,
                                              const juce::String& broadcastAddress = "255.255.255.255");
@@ -49,6 +53,12 @@ private:
     Ports ports;
     std::atomic<bool> targetChanged { false };
     std::vector<osc::Message> outbox; // changes waiting to be sent (guarded by lock)
+
+    // Troubleshooting log (guarded by lock).
+    void logReceived (const osc::Message&);
+    juce::StringArray recent;
+    juce::StringArray firstReplies, inputNamesAsked;
+    int requestsSent = 0, messagesReceived = 0, undecodable = 0, notUnderstood = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WingClient)
 };

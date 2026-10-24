@@ -346,6 +346,20 @@ void testBusMode()
     check (maxStep < 0.01f, "bus mode: switching buses crossfades (largest sample step)", maxStep);
     check (std::abs (settled - 0.9f) < 1e-4f, "bus mode: switch ends on the new bus", settled);
 
+    // A bus arriving on the left only can be copied to both sides.
+    setParam (rack, sr::masterId ("busChannels"), 1.0f);
+    float rightPeak = 0.0f;
+    for (int b = 0; b < 10; ++b)
+    {
+        buffer.clear();
+        for (int i = 0; i < block; ++i)
+            buffer.setSample (0, i, 0.4f);
+        rack.processBlock (buffer, midi);
+        rightPeak = buffer.getMagnitude (1, 0, block);
+    }
+    check (std::abs (rightPeak - 0.4f) < 1e-4f, "bus mode: Left only puts the left side on both", rightPeak);
+    setParam (rack, sr::masterId ("busChannels"), 0.0f);
+
     // Pair names survive loading a scene saved before they were set.
     const auto oldScene = rack.createStateTree();
     rack.setPairName (1, "Stream bus");
@@ -731,6 +745,9 @@ void testWingClient()
     console.setText ("/ch/1/send/14/mode", "PRE");
     console.setText ("/bus/14/name", "STREAM");
     console.setText ("$shown/ch/2/name", "Lead Vox"); // channel 2 shows its input source's name
+    console.setText ("/ch/3/in/conn/grp", "A");        // channel 3 has no name but is patched to A3,
+    console.setText ("/ch/3/in/conn/in", "3");         // which is named
+    console.setText ("/io/in/A/3/name", "Choir");
     console.setInputLevel (0, -18.0f);
 
     WingClient client;
@@ -748,6 +765,9 @@ void testWingClient()
     });
     check (loaded, "wing client: names and stream sends loaded", 0);
     check (client.getState().sources[1].name == "Lead Vox", "wing client: shows the name the console screen shows ($name)", 0);
+    check (waitFor ([&] { return client.getState().sources[2].name == "Choir"; }, 3000),
+           "wing client: unnamed channel shows its patched input's name", 0);
+    check (client.getDiagnostics().contains ("Lead Vox"), "wing client: diagnostics list what was understood", 0);
 
     const bool metered = waitFor ([&]
     {

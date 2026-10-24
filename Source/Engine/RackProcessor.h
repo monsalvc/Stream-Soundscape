@@ -83,6 +83,7 @@ public:
     std::atomic<float> masterPeakL { 0.0f }, masterPeakR { 0.0f }; // UI resets after reading
     std::atomic<float> limiterReductionDb { 0.0f }, busCompReductionDb { 0.0f }, levelerGainDb { 0.0f };
     std::atomic<float> busInPeakL { 0.0f }, busInPeakR { 0.0f }; // bus mode input, UI resets after reading
+    std::atomic<float> busRawPeakL { 0.0f }, busRawPeakR { 0.0f }; // the pair as it arrived, before Channels
     std::array<std::atomic<float>, maxInputs> inputPeaks {};       // every input, UI resets after reading
 
 private:
@@ -110,7 +111,7 @@ private:
     struct MasterRefs
     {
         std::atomic<float>*compOn, *compThr, *compRatio, *compAtk, *compRel, *compMakeup, *verbSize, *verbDamp,
-            *verbReturn, *limOn, *ceiling, *limRel, *fader, *busMode, *busSrc, *busTrim, *levOn, *levTarget,
+            *verbReturn, *limOn, *ceiling, *limRel, *fader, *busMode, *busSrc, *busTrim, *busChannels, *levOn, *levTarget,
             *levRange, *levSpeed;
     } m {};
 

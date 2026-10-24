@@ -45,7 +45,10 @@ private:
     float levelerGain = 0.0f, inPeakDb = -100.0f;
 
     juce::ComboBox input;
-    juce::TextButton renameButton { "Name..." };
+    juce::TextButton renameButton { "Name..." }, fixButton;
+    juce::ComboBox channelsBox;
+    std::unique_ptr<Apvts::ComboBoxAttachment> channelsAttachment;
+    int oneSideFrames = 0, silentSide = -1; // which side has been silent while the other has signal
     juce::OwnedArray<PairButton> picks;
     juce::StringArray pairNames;
     Knob trim { "Trim" };

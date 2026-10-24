@@ -142,6 +142,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { masterId ("busSrc"), 1 },
                                                               "Bus Input", pairs, 0));
     addDb (layout, masterId ("busTrim"), "Bus Trim", -24.0f, 24.0f, 0.0f);
+    // When the bus arrives on one side only (a mono bus, or one Dante channel routed), copy it
+    // to both sides so the stream isn't left-only.
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { masterId ("busChannels"), 1 },
+                                                              "Bus Channels",
+                                                              juce::StringArray { "Stereo", "Left only (to both)",
+                                                                                  "Right only (to both)", "Mono sum" },
+                                                              0));
 
     // Automatic leveler at the start of the master chain (both modes).
     addBool (layout, masterId ("levOn"), "Leveler On", true);
