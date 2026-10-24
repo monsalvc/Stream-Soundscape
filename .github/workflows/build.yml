@@ -8,6 +8,8 @@ on:
 jobs:
   macos:
     runs-on: macos-14
+    permissions:
+      contents: write # to publish the release below
     steps:
       - uses: actions/checkout@v4
 
@@ -38,6 +40,22 @@ jobs:
         with:
           name: StreamRack-macOS
           path: dist/StreamRack.dmg
+
+      # Every build of main becomes the latest release, so this link always gets the newest
+      # disk image without a GitHub sign-in or a zip:
+      # https://github.com/monsalvc/Stream-Soundscape/releases/latest/download/StreamRack.dmg
+      - name: Publish as the latest release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" dist/StreamRack.dmg \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "StreamRack build ${{ github.run_number }}" \
+            --notes "$(git log -1 --format=%B | sed '/^Co-Authored-By:/d;/^Claude-Session:/d')" \
+            --latest
 
   linux-tests:
     runs-on: ubuntu-24.04

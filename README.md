@@ -95,6 +95,14 @@ Use the **reverb bus slot** (in the master panel's REVERB BUS section) rather th
 reverb, so all channels share one reverb. When a plugin is loaded there it replaces the built-in reverb;
 set the plugin to 100% wet, and the channels' Reverb knobs control how much each one sends.
 
+## Download
+
+Get the newest Mac version (Apple Silicon) here, no GitHub account needed:
+**https://github.com/monsalvc/Stream-Soundscape/releases/latest/download/StreamRack.dmg**
+
+Open the disk image and drag StreamRack onto Applications. The first time, macOS may say it can't
+check the app: open **System Settings → Privacy & Security** and click **Open Anyway**.
+
 ## One-time setup
 
 ### 1. WING → Dante
