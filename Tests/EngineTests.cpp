@@ -730,6 +730,7 @@ void testWingClient()
     console.setFloat ("/ch/1/send/14/lvl", -2.0f);
     console.setText ("/ch/1/send/14/mode", "PRE");
     console.setText ("/bus/14/name", "STREAM");
+    console.setText ("$shown/ch/2/name", "Lead Vox"); // channel 2 shows its input source's name
     console.setInputLevel (0, -18.0f);
 
     WingClient client;
@@ -746,6 +747,7 @@ void testWingClient()
         return s.sources[0].name == "Pastor" && s.sources[0].sendOn && s.sources[0].sendMode == "PRE" && s.buses[13].name == "STREAM";
     });
     check (loaded, "wing client: names and stream sends loaded", 0);
+    check (client.getState().sources[1].name == "Lead Vox", "wing client: shows the name the console screen shows ($name)", 0);
 
     const bool metered = waitFor ([&]
     {

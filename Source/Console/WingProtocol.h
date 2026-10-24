@@ -136,10 +136,14 @@ inline juce::String textValue (const osc::Message& m)
 }
 
 // Applies one control message to the state. Returns false if it wasn't something we track.
+// Names and colours come from the "$" shadows ($name, $col): what the console's screen shows.
+// A channel linked to its input source (the WING's default) shows the source's name there while
+// its own name field stays empty, so the plain field only fills in when nothing better is known.
 inline bool apply (ConsoleState& state, const osc::Message& m)
 {
     if (m.args.empty())
         return false;
+    const bool shown = m.address.contains ("/$");
 
     auto parts = juce::StringArray::fromTokens (m.address.replace ("/$", "/"), "/", {});
     parts.removeEmptyStrings();
@@ -162,9 +166,15 @@ inline bool apply (ConsoleState& state, const osc::Message& m)
         if (parts.size() == 3)
         {
             if (field == "name")
-                s.name = textValue (m);
+            {
+                if (shown || s.name.isEmpty())
+                    s.name = textValue (m);
+            }
             else if (field == "col")
-                s.colour = textValue (m).getIntValue();
+            {
+                if (shown || s.colour == 0)
+                    s.colour = textValue (m).getIntValue();
+            }
             else if (field == "fdr")
                 s.fader = numericValue (m);
             else if (field == "mute")
@@ -200,7 +210,10 @@ inline bool apply (ConsoleState& state, const osc::Message& m)
             return false;
         auto& mix = bus ? state.buses[(size_t) (index - 1)] : state.mains[(size_t) (index - 1)];
         if (field == "name")
-            mix.name = textValue (m);
+        {
+            if (shown || mix.name.isEmpty())
+                mix.name = textValue (m);
+        }
         else if (field == "fdr")
             mix.fader = numericValue (m);
         else if (field == "mute")
@@ -225,7 +238,7 @@ inline juce::StringArray sourceAddresses (const Target& target)
     for (int s = 0; s < numSources; ++s)
     {
         const auto p = sourcePath (s);
-        for (const auto* f : { "/name", "/col", "/fdr", "/mute" })
+        for (const auto* f : { "/$name", "/$col", "/fdr", "/mute" })
             a.add (p + f);
         a.addArray (sendAddresses (s, target));
     }
@@ -236,10 +249,10 @@ inline juce::StringArray mixAddresses()
 {
     juce::StringArray a;
     for (int b = 1; b <= numBuses; ++b)
-        for (const auto* f : { "/name", "/fdr", "/mute" })
+        for (const auto* f : { "/$name", "/fdr", "/mute" })
             a.add ("/bus/" + juce::String (b) + f);
     for (int m = 1; m <= numMains; ++m)
-        for (const auto* f : { "/name", "/fdr", "/mute" })
+        for (const auto* f : { "/$name", "/fdr", "/mute" })
             a.add ("/main/" + juce::String (m) + f);
     return a;
 }

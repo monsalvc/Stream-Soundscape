@@ -251,11 +251,19 @@ void WingSimulator::handleControl (const osc::Message& m, const juce::String& ip
         return;
     }
 
-    // GET: no reply for an unknown address, like the console.
+    // GET: no reply for an unknown address, like the console. A "$" shadow reads what the
+    // screen shows: a "$shown/..." override if there is one (a channel linked to its input
+    // source), otherwise the parameter itself.
     osc::Message reply;
     {
         const juce::ScopedLock sl (lock);
-        const auto it = params.find (m.address);
+        auto it = params.find (m.address);
+        if (it == params.end() && m.address.contains ("/$"))
+        {
+            it = params.find ("$shown" + m.address.replace ("/$", "/"));
+            if (it == params.end())
+                it = params.find (m.address.replace ("/$", "/"));
+        }
         if (it == params.end())
             return;
         reply = valueMessage (m.address, it->second);
