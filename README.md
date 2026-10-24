@@ -148,8 +148,9 @@ skipped. Then click any **+ insert** button to load one.
 ### 5. Watching the console (WING over the network)
 
 Click **Console** for a separate window that shows the WING channels feeding the stream bus, the way
-BoxCast RemoteMix does: each channel's name and colour from the console, its input meter, its send
-level to the stream bus (PRE/POST) and its fader. It only reads from the console; nothing in
+BoxCast RemoteMix does, as a condensed fader bank: each channel's scribble strip (name and colour
+from the console), its send to the stream bus drawn as a fader (with PRE/POST), its input meter, its
+channel fader and its mute, plus the stream bus as a master strip on the right. It only reads from the console; nothing in
 StreamRack changes the WING.
 
 - **Connect:** the color Mac must reach the WING's own **Ethernet port** (on the back of the console,
@@ -159,11 +160,11 @@ StreamRack changes the WING.
   Security → Local Network). StreamRack reconnects to the same console when it starts.
 - **Pick the stream bus** in the dropdown (it picks a bus named "STREAM" by itself). **All channels**
   also shows named channels that aren't sent to it.
-- **What the tiles mean:** a green outline means the channel is live on the stream. **MUTED - LIVE**
-  with an amber outline means someone is talking or playing on a channel that is muted, so the
-  stream can't hear it. **FADER DOWN** means a post-fader send whose fader is down. **NOT ON
-  STREAM** means the send is off. The tile on the left is the stream bus itself, with its meter and
-  a **BUS MUTED** warning.
+- **What the strips mean:** a green outline (and green signal light) means the channel is live on
+  the stream. An amber outline means someone is talking or playing on a channel the stream can't
+  hear: it's muted (**MUTE !**) or it's a post-fader send with the channel fader down. **OFF** under
+  the fader means the send is switched off. The master strip shows the stream bus fader, its stereo
+  meter and a red **MUTE** when the bus itself is muted.
 - **Demo console:** a pretend WING on the same Mac (in the Connect dialog) for learning the screen
   away from the booth.
 

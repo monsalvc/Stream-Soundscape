@@ -5,11 +5,12 @@
 
 namespace sr::ui
 {
-// One console channel in the console view: name, input meter, send to the stream and warnings.
+// One console channel as a condensed fader strip: scribble strip, the send to the stream bus
+// drawn as a fader, the channel's input meter, and its mute.
 class SourceTile : public juce::Component
 {
 public:
-    static constexpr int width = 116, height = 112;
+    static constexpr int width = 78, minHeight = 190;
 
     void update (const wing::SourceState&, int index);
     void paint (juce::Graphics&) override;
@@ -20,7 +21,7 @@ private:
     float meterDb = -100.0f;
 };
 
-// The stream bus itself: its meter, fader and mute.
+// The stream bus itself as a master strip: its fader, stereo meter and mute.
 class MixTile : public juce::Component
 {
 public:

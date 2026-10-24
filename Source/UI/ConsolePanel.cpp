@@ -38,11 +38,67 @@ namespace
         g.fillRoundedRectangle (fill, 2.0f);
     }
 
-    void drawBadge (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& text, juce::Colour fill, juce::Colour ink)
+    // Console-style fader law: more travel around 0 dB, -oo at the bottom.
+    float faderPosition (float db)
     {
-        g.setColour (fill);
+        static const std::pair<float, float> points[] = { { -144.0f, 0.0f }, { -60.0f, 0.04f }, { -50.0f, 0.1f },
+                                                          { -40.0f, 0.17f }, { -30.0f, 0.27f }, { -20.0f, 0.4f },
+                                                          { -10.0f, 0.56f }, { -5.0f, 0.66f },  { 0.0f, 0.76f },
+                                                          { 5.0f, 0.88f },   { 10.0f, 1.0f } };
+        if (db <= points[0].first)
+            return 0.0f;
+        for (size_t i = 1; i < std::size (points); ++i)
+            if (db <= points[i].first)
+            {
+                const auto [d0, p0] = points[i - 1];
+                const auto [d1, p1] = points[i];
+                return p0 + (p1 - p0) * (db - d0) / (d1 - d0);
+            }
+        return 1.0f;
+    }
+
+    // Fader track with a scale and a cap, like a console strip. Read-only.
+    void drawFader (juce::Graphics& g, juce::Rectangle<int> area, float db, juce::Colour capLine, bool active, bool scale)
+    {
+        auto r = area.toFloat().reduced (0.0f, 8.0f); // room for half a cap at each end
+        const float trackX = r.getCentreX();
+        g.setColour (colours::background);
+        g.fillRoundedRectangle (trackX - 2.5f, r.getY() - 2.0f, 5.0f, r.getHeight() + 4.0f, 2.5f);
+
+        if (scale)
+        {
+            g.setFont (juce::FontOptions (8.5f));
+            for (const auto& [mark, label] : { std::pair { 10.0f, "10" }, { 0.0f, "0" }, { -10.0f, "10" }, { -20.0f, "20" },
+                                               { -40.0f, "40" }, { -144.0f, "oo" } })
+            {
+                const float y = r.getBottom() - r.getHeight() * faderPosition (mark);
+                g.setColour (juce::exactlyEqual (mark, 0.0f) ? colours::text.withAlpha (0.7f) : colours::dim.withAlpha (0.6f));
+                g.drawHorizontalLine ((int) y, area.getX() + 14.0f, trackX - 7.0f);
+                g.drawText (label, juce::Rectangle<float> ((float) area.getX(), y - 5.0f, 13.0f, 10.0f), juce::Justification::centredRight);
+            }
+        }
+
+        // Cap: a raised block with a line across the middle.
+        const float y = r.getBottom() - r.getHeight() * faderPosition (db);
+        const juce::Rectangle<float> cap (trackX - 13.0f, y - 8.0f, 26.0f, 16.0f);
+        juce::ColourGradient grad (juce::Colour (0xffd9e2e3), cap.getX(), cap.getY(), juce::Colour (0xff8c9c9b), cap.getX(), cap.getBottom(), false);
+        g.setGradientFill (grad);
+        g.setOpacity (active ? 1.0f : 0.45f);
+        g.fillRoundedRectangle (cap, 3.0f);
+        g.setOpacity (1.0f);
+        g.setColour (colours::background.withAlpha (0.6f));
+        g.drawRoundedRectangle (cap, 3.0f, 1.0f);
+        g.setColour (active ? capLine : colours::dim);
+        g.fillRect (cap.getX() + 3.0f, cap.getCentreY() - 1.0f, cap.getWidth() - 6.0f, 2.0f);
+    }
+
+    void drawButtonLight (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& text, bool lit, juce::Colour litColour)
+    {
+        g.setColour (lit ? litColour : colours::background);
         g.fillRoundedRectangle (r.toFloat(), 3.0f);
-        g.setColour (ink);
+        g.setColour (lit ? litColour.brighter (0.3f) : colours::outline);
+        g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 3.0f, 1.0f);
+        g.setColour (lit ? colours::text : colours::dim);
         g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
         g.drawFittedText (text, r, juce::Justification::centred, 1);
     }
@@ -63,57 +119,59 @@ void SourceTile::paint (juce::Graphics& g)
     const bool feeds = source.feedsTarget();
     const bool talking = meterDb > talkingDb;
     const bool warning = talking && inMix && ! feeds;
+    const auto colour = wingColour (source.colour);
 
-    auto r = getLocalBounds().reduced (3).toFloat();
+    auto r = getLocalBounds().reduced (2, 0).toFloat();
     g.setColour (feeds ? colours::panelRaised : colours::panel);
-    g.fillRoundedRectangle (r, 6.0f);
-    g.setColour (wingColour (source.colour));
-    g.fillRoundedRectangle (r.withHeight (4.0f), 2.0f);
+    g.fillRoundedRectangle (r, 5.0f);
 
     // Outline: amber when someone is heard on the console but not on the stream, green when live.
-    if (warning)
+    if (warning || (feeds && talking))
     {
-        g.setColour (colours::amber);
-        g.drawRoundedRectangle (r.reduced (1.0f), 6.0f, 2.0f);
-    }
-    else if (feeds && talking)
-    {
-        g.setColour (colours::green);
-        g.drawRoundedRectangle (r.reduced (0.75f), 6.0f, 1.5f);
+        g.setColour (warning ? colours::amber : colours::green.withAlpha (0.8f));
+        g.drawRoundedRectangle (r.reduced (1.0f), 5.0f, warning ? 2.0f : 1.5f);
     }
 
-    auto content = r.reduced (8.0f, 0.0f).withTrimmedTop (10.0f).withTrimmedBottom (8.0f).toNearestInt();
-    drawMeterBar (g, content.removeFromLeft (8).toFloat(), meterDb, feeds);
-    content.removeFromLeft (8);
+    auto content = r.reduced (5.0f, 4.0f).toNearestInt();
 
-    const auto name = source.name.isNotEmpty() ? source.name
-                                               : (index < wing::numChannels ? "Ch " + juce::String (index + 1)
-                                                                            : "Aux " + juce::String (index - wing::numChannels + 1));
-    g.setColour (feeds ? colours::text : colours::dim);
-    g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
-    g.drawFittedText (name, content.removeFromTop (18), juce::Justification::centredLeft, 1);
+    // Scribble strip: console colour, name, channel number.
+    auto scribble = content.removeFromTop (34);
+    g.setColour (colour.withAlpha (feeds ? 0.9f : 0.45f));
+    g.fillRoundedRectangle (scribble.toFloat(), 3.0f);
+    const bool lightInk = colour.getPerceivedBrightness() < 0.55f;
+    g.setColour (lightInk ? juce::Colours::white : juce::Colour (0xff10201a));
+    g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+    const auto number = index < wing::numChannels ? "CH " + juce::String (index + 1) : "AUX " + juce::String (index - wing::numChannels + 1);
+    g.drawText (number, scribble.removeFromTop (14).reduced (4, 0), juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+    g.drawFittedText (source.name.isNotEmpty() ? source.name : number, scribble.reduced (3, 0), juce::Justification::centred, 1);
+    content.removeFromTop (4);
 
-    g.setFont (juce::FontOptions (11.5f));
+    // Send mode and a signal light.
+    auto modeRow = content.removeFromTop (16);
+    g.setColour (talking ? (warning ? colours::amber : colours::green) : colours::background);
+    g.fillEllipse (modeRow.removeFromRight (12).withSizeKeepingCentre (8, 8).toFloat());
     g.setColour (colours::dim);
-    auto sendRow = content.removeFromTop (17);
-    g.drawText ("Send " + formatDb (source.sendLevel), sendRow, juce::Justification::centredLeft);
-    if (source.sendMode.isNotEmpty())
-    {
-        g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
-        g.drawText (source.sendMode, sendRow, juce::Justification::centredRight);
-        g.setFont (juce::FontOptions (11.5f));
-    }
-    g.drawText ("Fader " + formatDb (source.fader), content.removeFromTop (17), juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+    g.drawText (source.sendMode.isNotEmpty() ? source.sendMode : juce::String ("SEND"), modeRow, juce::Justification::centredLeft);
 
-    auto badge = content.removeFromBottom (18);
-    if (source.mute && inMix)
-        drawBadge (g, badge, warning ? "MUTED - LIVE" : "MUTED", colours::red, colours::text);
-    else if (! inMix)
-        drawBadge (g, badge, "NOT ON STREAM", colours::background, colours::dim);
-    else if (! feeds)
-        drawBadge (g, badge, "FADER DOWN", colours::amber, colours::onAccent);
-    else if (talking)
-        drawBadge (g, badge, "ON STREAM", colours::green, colours::onAccent);
+    // Bottom: send level readout, channel fader, mute.
+    auto mute = content.removeFromBottom (20);
+    drawButtonLight (g, mute, warning && source.mute ? "MUTE !" : "MUTE", source.mute, colours::red);
+    content.removeFromBottom (3);
+    g.setColour (colours::dim);
+    g.setFont (juce::FontOptions (9.5f));
+    g.drawText ("Ch fdr " + formatDb (source.fader), content.removeFromBottom (12), juce::Justification::centred);
+    g.setColour (inMix ? colours::text : colours::dim);
+    g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+    g.drawText (source.sendOn ? formatDb (source.sendLevel) : juce::String ("OFF"), content.removeFromBottom (16), juce::Justification::centred);
+    content.removeFromBottom (2);
+
+    // The send to the stream bus as a fader, with the channel's input meter beside it.
+    auto meter = content.removeFromRight (6).reduced (0, 6);
+    drawMeterBar (g, meter.toFloat(), meterDb, feeds);
+    content.removeFromRight (2);
+    drawFader (g, content, source.sendOn ? source.sendLevel : wing::minusInf, colour, inMix, content.getHeight() > 90);
 }
 
 //==============================================================================
@@ -129,66 +187,44 @@ void MixTile::update (const wing::MixState& m, const wing::Target& t, bool meter
 
 void MixTile::paint (juce::Graphics& g)
 {
-    auto r = getLocalBounds().reduced (3).toFloat();
+    auto r = getLocalBounds().reduced (2, 0).toFloat();
     g.setColour (colours::panelRaised);
-    g.fillRoundedRectangle (r, 6.0f);
+    g.fillRoundedRectangle (r, 5.0f);
     if (mix.mute)
     {
         g.setColour (colours::red);
-        g.drawRoundedRectangle (r.reduced (1.0f), 6.0f, 2.0f);
+        g.drawRoundedRectangle (r.reduced (1.0f), 5.0f, 2.0f);
     }
 
-    auto content = r.reduced (10.0f, 8.0f).toNearestInt();
-    const bool across = getWidth() > getHeight() * 2; // a strip along the top of a narrow window
-    auto labels = across ? content.removeFromLeft (juce::jmin (180, content.getWidth() / 3)) : content.removeFromTop (36);
+    auto content = r.reduced (6.0f, 4.0f).toNearestInt();
+    auto scribble = content.removeFromTop (34);
+    g.setColour (colours::accent);
+    g.fillRoundedRectangle (scribble.toFloat(), 3.0f);
+    g.setColour (colours::onAccent);
+    g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+    g.drawText (target.label().toUpperCase(), scribble.removeFromTop (14).reduced (4, 0), juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+    g.drawFittedText (mix.name.isNotEmpty() ? mix.name : juce::String ("Stream"), scribble.reduced (3, 0), juce::Justification::centred, 1);
+    content.removeFromTop (4);
+
     g.setColour (colours::dim);
-    g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
-    g.drawText ("STREAM " + target.label().toUpperCase(), labels.removeFromTop (14), juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+    g.drawText (meters ? "BUS OUT" : "NO METERS", content.removeFromTop (16), juce::Justification::centredLeft);
+
+    auto mute = content.removeFromBottom (20);
+    drawButtonLight (g, mute, "MUTE", mix.mute, colours::red);
+    content.removeFromBottom (3 + 12);
     g.setColour (colours::text);
-    g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
-    g.drawFittedText (mix.name.isNotEmpty() ? mix.name : target.label(), labels.removeFromTop (22),
-                      juce::Justification::centredLeft, 1);
+    g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+    g.drawText (formatDb (mix.fader), content.removeFromBottom (16), juce::Justification::centred);
+    content.removeFromBottom (2);
 
-    auto badge = across ? content.removeFromRight (90).withSizeKeepingCentre (90, 20) : content.removeFromBottom (20);
-    if (mix.mute)
-        drawBadge (g, badge, "BUS MUTED", colours::red, colours::text);
-    else
-        drawBadge (g, badge, "LIVE", colours::green.withAlpha (0.25f), colours::green);
-
-    if (across)
-    {
-        // Horizontal meters with the fader readout under them.
-        content.reduce (12, 0);
-        auto text = content.removeFromBottom (16);
-        auto meterRow = content.withSizeKeepingCentre (content.getWidth(), 18);
-        for (float db : { meterL, meterR })
-        {
-            auto bar = meterRow.removeFromTop (8).toFloat();
-            meterRow.removeFromTop (2);
-            g.setColour (colours::background);
-            g.fillRoundedRectangle (bar, 2.0f);
-            const float proportion = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
-            g.setColour ((db > -3.0f ? colours::red : (db > -12.0f ? colours::amber : colours::green)).withAlpha (mix.mute ? 0.35f : 1.0f));
-            g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * proportion), 2.0f);
-        }
-        g.setColour (colours::dim);
-        g.setFont (juce::FontOptions (11.5f));
-        g.drawText ("Fader " + formatDb (mix.fader) + (meters ? "" : "   (no meters yet)"), text, juce::Justification::centredLeft);
-        return;
-    }
-
-    auto meterArea = content.reduced (0, 4);
-    auto left = meterArea.removeFromLeft (10);
-    meterArea.removeFromLeft (3);
-    auto right = meterArea.removeFromLeft (10);
-    drawMeterBar (g, left.toFloat(), meterL, ! mix.mute);
-    drawMeterBar (g, right.toFloat(), meterR, ! mix.mute);
-    meterArea.removeFromLeft (10);
-
-    g.setColour (colours::dim);
-    g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("Fader " + formatDb (mix.fader), meterArea.removeFromTop (18), juce::Justification::centredLeft);
-    g.drawFittedText (meters ? "Bus output" : "No meters yet", meterArea.removeFromTop (18), juce::Justification::centredLeft, 1);
+    auto meters2 = content.removeFromRight (15).reduced (0, 6);
+    drawMeterBar (g, meters2.removeFromLeft (6).toFloat(), meterL, ! mix.mute);
+    meters2.removeFromLeft (3);
+    drawMeterBar (g, meters2.toFloat(), meterR, ! mix.mute);
+    content.removeFromRight (2);
+    drawFader (g, content, mix.fader, colours::accent, ! mix.mute, content.getHeight() > 90);
 }
 
 //==============================================================================
@@ -219,7 +255,7 @@ ConsolePanel::ConsolePanel (wing::WingClient& c, juce::PropertiesFile& s) : clie
         tileContainer.addChildComponent (tiles.add (new SourceTile()));
     shown.assign ((size_t) wing::numSources, false);
     viewport.setViewedComponent (&tileContainer, false);
-    viewport.setScrollBarsShown (true, false);
+    viewport.setScrollBarsShown (true, true);
     addAndMakeVisible (viewport);
 
     client.setTarget (wing::Target::fromString (settings.getValue ("wingTarget", "bus1")));
@@ -416,40 +452,31 @@ void ConsolePanel::resized()
     if (connected && std::none_of (shown.begin(), shown.end(), [] (bool b) { return b; }))
         hintArea = r.removeFromTop (60);
 
-    // The stream bus tile on the left (along the top when narrow), the channels feeding it in a
-    // wrapping grid.
-    if (twoRows)
-    {
-        mixTile.setBounds (r.removeFromTop (70));
-        r.removeFromTop (6);
-    }
-    else
-    {
-        mixTile.setBounds (r.removeFromLeft (150).withHeight (juce::jmin (r.getHeight(), 2 * SourceTile::height)));
-        r.removeFromLeft (6);
-    }
+    // Like a console: the channels feeding the stream in a row (scrolling sideways), the stream
+    // bus as a master strip on the right.
+    mixTile.setBounds (r.removeFromRight (SourceTile::width + 14));
+    r.removeFromRight (6);
     viewport.setBounds (r);
     layoutTiles();
 }
 
 void ConsolePanel::layoutTiles()
 {
-    const int width = juce::jmax (SourceTile::width, viewport.getMaximumVisibleWidth());
-    const int columns = juce::jmax (1, width / SourceTile::width);
-    int n = 0;
+    const int needed = (int) std::count (shown.begin(), shown.end(), true) * SourceTile::width;
+    const int height = juce::jmax (SourceTile::minHeight,
+                                   viewport.getHeight() - (needed > viewport.getWidth() ? viewport.getScrollBarThickness() : 0));
+    int x = 0;
     for (int i = 0; i < wing::numSources; ++i)
     {
         const bool show = showsSource (i);
         tiles[i]->setVisible (show);
         if (show)
         {
-            tiles[i]->setBounds ((n % columns) * SourceTile::width, (n / columns) * SourceTile::height, SourceTile::width,
-                                 SourceTile::height);
-            ++n;
+            tiles[i]->setBounds (x, 0, SourceTile::width, height);
+            x += SourceTile::width;
         }
     }
-    const int rows = (n + columns - 1) / columns;
-    tileContainer.setSize (width, juce::jmax (1, rows * SourceTile::height));
+    tileContainer.setSize (juce::jmax (1, x), height);
 }
 
 //==============================================================================
