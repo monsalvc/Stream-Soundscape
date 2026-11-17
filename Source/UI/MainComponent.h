@@ -74,7 +74,8 @@ private:
     ConsolePanel consolePanel;
 
     bool locked = false, wingView = false;
-    int statusCountdown = 0;
+    int statusCountdown = 0, danteCheckCountdown = 0;
+    bool danteInstalled = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

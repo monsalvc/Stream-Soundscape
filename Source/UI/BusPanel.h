@@ -29,6 +29,11 @@ public:
     explicit BusPanel (RackProcessor&);
 
     void setLocked (bool);
+
+    // Where the audio is coming from: the Mac's selected audio device. StreamRack only receives the
+    // WING over Dante when that device is Dante Virtual Soundcard (or another network driver).
+    void setSource (const juce::String& deviceName, bool networkAudio, bool danteInstalled);
+    std::function<void()> onUseDante;
     void tick();
 
     void paint (juce::Graphics&) override;
@@ -51,6 +56,10 @@ private:
     int oneSideFrames = 0, silentSide = -1; // which side has been silent while the other has signal
     juce::OwnedArray<PairButton> picks;
     juce::StringArray pairNames;
+    juce::String deviceName, pairPrefix { "Input " };
+    bool networkAudio = false, danteInstalled = false;
+    juce::TextButton useDanteButton { "Use Dante Virtual Soundcard" };
+    juce::Rectangle<int> sourceArea;
     Knob trim { "Trim" };
     Meter meterL, meterR;
     std::unique_ptr<Apvts::ComboBoxAttachment> inputAttachment;

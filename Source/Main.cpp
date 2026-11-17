@@ -1,3 +1,4 @@
+#include "Engine/AudioDevices.h"
 #include "Engine/RackProcessor.h"
 #include "UI/MainComponent.h"
 
@@ -68,6 +69,11 @@ public:
         {
             DBG ("Audio device error: " << error);
         }
+
+        // First run on this Mac: receive over Dante if Dante Virtual Soundcard is installed,
+        // rather than whatever interface happens to be the system default.
+        if (savedDevice == nullptr)
+            sr::devices::useDanteVirtualSoundcard (deviceManager);
         deviceManager.addChangeListener (this);
 
         player.setProcessor (rack.get());

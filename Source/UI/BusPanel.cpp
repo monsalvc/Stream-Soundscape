@@ -1,4 +1,5 @@
 #include "BusPanel.h"
+#include "Engine/AudioDevices.h"
 
 namespace sr::ui
 {
@@ -53,8 +54,8 @@ BusPanel::BusPanel (RackProcessor& r) : rack (r)
 {
     if (auto* p = dynamic_cast<juce::AudioParameterChoice*> (rack.state.getParameter (masterId ("busSrc"))))
         for (int i = 0; i < p->choices.size(); ++i)
-            input.addItem ("Dante " + p->choices[i], i + 1);
-    input.setTooltip ("The two Dante channels carrying the stream bus (left, right)");
+            input.addItem (pairPrefix + p->choices[i], i + 1);
+    input.setTooltip ("The two input channels carrying the stream bus (left, right)");
     inputAttachment = std::make_unique<Apvts::ComboBoxAttachment> (rack.state, masterId ("busSrc"), input);
     addAndMakeVisible (input);
 
@@ -72,7 +73,15 @@ BusPanel::BusPanel (RackProcessor& r) : rack (r)
     };
     addChildComponent (fixButton);
 
-    renameButton.setTooltip ("Name the selected Dante pair (e.g. \"Stream bus\") to get a one-click button for it");
+    useDanteButton.setTooltip ("Switch the audio input to Dante Virtual Soundcard, so StreamRack receives the WING over Dante");
+    useDanteButton.onClick = [this]
+    {
+        if (onUseDante)
+            onUseDante();
+    };
+    addChildComponent (useDanteButton);
+
+    renameButton.setTooltip ("Name the selected input pair (e.g. \"Stream bus\") to get a one-click button for it");
     renameButton.onClick = [this] { renameCurrentPair(); };
     addAndMakeVisible (renameButton);
     refreshPairNames();
@@ -98,6 +107,26 @@ int BusPanel::selectedPair() const
     return (int) rack.state.getRawParameterValue (masterId ("busSrc"))->load();
 }
 
+void BusPanel::setSource (const juce::String& newDeviceName, bool isNetworkAudio, bool isDanteInstalled)
+{
+    if (newDeviceName == deviceName && isNetworkAudio == networkAudio && isDanteInstalled == danteInstalled)
+        return;
+    deviceName = newDeviceName;
+    networkAudio = isNetworkAudio;
+    danteInstalled = isDanteInstalled;
+
+    // Pairs are only called Dante when they come from Dante.
+    const juce::String prefix = devices::isDante (deviceName) ? "Dante " : "Input ";
+    if (prefix != pairPrefix)
+    {
+        pairPrefix = prefix;
+        pairNames.clear(); // relabel everything
+        refreshPairNames();
+    }
+    resized();
+    repaint();
+}
+
 void BusPanel::refreshPairNames()
 {
     juce::StringArray names;
@@ -111,13 +140,13 @@ void BusPanel::refreshPairNames()
     for (int pair = 0; pair < pairNames.size(); ++pair)
     {
         const auto& name = pairNames[pair];
-        input.changeItemText (pair + 1, "Dante " + pairLabel (pair) + (name.isNotEmpty() ? ":  " + name : juce::String()));
+        input.changeItemText (pair + 1, pairPrefix + pairLabel (pair) + (name.isNotEmpty() ? ":  " + name : juce::String()));
         if (name.isEmpty())
             continue;
 
         auto* b = picks.add (new PairButton (pair));
         b->setButtonText (name);
-        b->setTooltip ("Dante " + pairLabel (pair));
+        b->setTooltip (pairPrefix + pairLabel (pair));
         b->setEnabled (! locked);
         b->onClick = [this, pair]
         {
@@ -141,7 +170,7 @@ void BusPanel::renameCurrentPair()
 {
     const int pair = selectedPair();
 
-    auto* window = new juce::AlertWindow ("Name Dante " + pairLabel (pair),
+    auto* window = new juce::AlertWindow ("Name " + pairPrefix + pairLabel (pair),
                                           "What does the WING send on this pair? For example \"Stream bus\" or "
                                           "\"Youth bus\". Leave it empty to remove the name.",
                                           juce::MessageBoxIconType::NoIcon, this);
@@ -214,6 +243,25 @@ void BusPanel::paint (juce::Graphics& g)
 {
     g.fillAll (colours::background);
     drawSection (g, inputArea, "STREAM BUS IN");
+
+    // The source: green when it's the network (Dante), amber when it's a local interface.
+    if (! sourceArea.isEmpty())
+    {
+        auto s = sourceArea;
+        g.setColour (networkAudio ? colours::green : colours::amber);
+        g.fillEllipse (s.removeFromLeft (12).withSizeKeepingCentre (9, 9).toFloat());
+        s.removeFromLeft (6);
+        if (useDanteButton.isVisible())
+            s.removeFromRight (useDanteButton.getWidth() + 8);
+        g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+        g.setColour (colours::text);
+        const auto device = deviceName.isNotEmpty() ? deviceName : juce::String ("no audio device");
+        juce::String text = "From: " + device;
+        if (! networkAudio)
+            text << (danteInstalled ? "   (not Dante: the WING isn't coming from the network)"
+                                    : "   (not Dante: install Dante Virtual Soundcard to receive the WING)");
+        g.drawFittedText (text, s, juce::Justification::centredLeft, 1);
+    }
     drawSection (g, levelerArea, "AUTO LEVELER");
     if (! flowArea.isEmpty())
         drawSection (g, flowArea, "SIGNAL FLOW");
@@ -236,7 +284,8 @@ void BusPanel::paint (juce::Graphics& g)
         if (fixButton.isVisible())
             g.setColour (colours::amber);
         g.drawFittedText (fixButton.isVisible() ? (silentSide == 1 ? "Only the left side has signal" : "Only the right side has signal")
-                          : silent ? "No signal: check Dante routing" : (hot ? "Very hot: lower the trim" : "dBFS peak"),
+                          : silent ? (networkAudio ? "No signal: check Dante routing" : "No signal on this input")
+                                   : (hot ? "Very hot: lower the trim" : "dBFS peak"),
                           a.removeFromTop (18), juce::Justification::centredLeft, 1);
     }
 
@@ -289,8 +338,8 @@ void BusPanel::paint (juce::Graphics& g)
     // Signal flow chips.
     if (! flowArea.isEmpty())
     {
-        const juce::StringArray steps { "Dante in", "Trim", "Leveler", "Bus Comp", "Inserts", "Fader", "Limiter",
-                                        "Dante out" };
+        const juce::StringArray steps { networkAudio ? "Dante in" : "Input", "Trim", "Leveler", "Bus Comp", "Inserts",
+                                        "Fader", "Limiter", networkAudio ? "Dante out" : "Output" };
         auto a = flowArea.reduced (12, 0).withTrimmedTop (26).withHeight (30);
         const float arrow = 14.0f;
         const float chipW = ((float) a.getWidth() - arrow * (float) (steps.size() - 1)) / (float) steps.size();
@@ -348,7 +397,13 @@ void BusPanel::resized()
         inputArea = c;
     }
 
-    auto a = inputArea.reduced (16, 0).withTrimmedTop (26).withTrimmedBottom (10);
+    auto a = inputArea.reduced (16, 0).withTrimmedTop (22).withTrimmedBottom (10);
+    sourceArea = a.removeFromTop (24);
+    const bool offerDante = ! networkAudio && danteInstalled && ! locked;
+    useDanteButton.setVisible (offerDante);
+    if (offerDante)
+        useDanteButton.setBounds (sourceArea.withLeft (sourceArea.getRight() - 210).reduced (0, 1));
+    a.removeFromTop (6);
     auto meters = a.removeFromLeft (34);
     meterL.setBounds (meters.removeFromLeft (15));
     meters.removeFromLeft (4);

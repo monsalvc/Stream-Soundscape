@@ -123,7 +123,12 @@ check the app: open **System Settings → Privacy & Security** and click **Open 
    - WING card → this Mac's DVS receive channels (the bus pair, or the individual channels).
    - This Mac's DVS transmit channels **1-2** → the Wirecast Mac's DVS receive channels that Wirecast
      already uses. StreamRack sends the finished mix to every output pair, so 1-2 is all you need.
-4. In Bus mode, pick the Dante pair the bus arrives on in **STREAM BUS IN** and check the meters move.
+4. The top of **STREAM BUS IN** says where the audio really comes from ("From: Dante Virtual
+   Soundcard", green). If it names another interface (amber, e.g. a USB box), StreamRack is not
+   hearing the WING over Dante: click **Use Dante Virtual Soundcard** (shown when it's installed),
+   or choose it in **Audio...**. On a Mac where StreamRack has never run, it picks Dante Virtual
+   Soundcard by itself. Input pairs are only labelled "Dante" when they come from Dante.
+   In Bus mode, pick the Dante pair the bus arrives on in **STREAM BUS IN** and check the meters move.
    If only one meter moves (the bus is mono on the WING, or only one Dante channel is routed), set
    **Channels** under the dropdown to **Left only** or **Right only** to put it on both sides; the
    screen offers this itself when one side stays silent. **Mono sum** folds both sides together.

@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "Engine/AudioDevices.h"
 #include <BinaryData.h>
 
 namespace sr::ui
@@ -71,6 +72,13 @@ MainComponent::MainComponent (RackProcessor& r, juce::AudioDeviceManager& dm, ju
     addChildComponent (busPanel);
     addAndMakeVisible (master);
     consolePanel.onConnectClicked = [this] { showConnectDialog(); };
+    busPanel.onUseDante = [this]
+    {
+        const auto error = devices::useDanteVirtualSoundcard (deviceManager);
+        if (error.isNotEmpty())
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Dante Virtual Soundcard", error);
+        updateStatus();
+    };
     addChildComponent (consolePanel);
 
     rack.onSlotAboutToChange = [this] (PluginSlot& slot) { pluginWindows.close (slot); };
@@ -190,6 +198,16 @@ void MainComponent::timerCallback()
 void MainComponent::updateStatus()
 {
     auto* device = deviceManager.getCurrentAudioDevice();
+
+    // Tell the Bus screen where the audio really comes from (checking for Dante Virtual Soundcard
+    // every few seconds, since it can be installed or started while StreamRack runs).
+    if (--danteCheckCountdown <= 0)
+    {
+        danteCheckCountdown = 10;
+        danteInstalled = devices::findDanteVirtualSoundcard (deviceManager).has_value();
+    }
+    const auto deviceName = device != nullptr ? device->getName() : juce::String();
+    busPanel.setSource (deviceName, devices::isNetworkAudio (deviceName), danteInstalled);
     if (device == nullptr)
     {
         status.setText ("No audio device. Click Audio... to choose Dante Virtual Soundcard.", juce::dontSendNotification);
